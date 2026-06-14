@@ -2,6 +2,7 @@
 
 Browse, plot, and compare MITgcm MDS (`.data`/`.meta`) binary output. Use the CLI on a cluster or the optional GUI on your laptop.
 
+[![PyPI version](https://img.shields.io/pypi/v/mdsview.svg)](https://pypi.org/project/mdsview/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -13,9 +14,11 @@ For huge LLC runs or lazy xarray loading, use [`xmitgcm`](https://xmitgcm.readth
 
 ## Install
 
+From [PyPI](https://pypi.org/project/mdsview/):
+
 ```bash
-pip install mdsview
-pip install "mdsview[gui]"    # optional desktop GUI
+pip install mdsview              # CLI (headless)
+pip install "mdsview[gui]"       # + desktop GUI (CustomTkinter)
 ```
 
 From source:
@@ -192,18 +195,6 @@ plotting.plot_field("/path/to/run", "T", 480, level=4, save="t.png", show=False)
 - Standard MDS only, not `pkg/mnc` tiles (use `gluemnc` first)
 - `dod --rec` for multi-record files; other commands may need extending
 - No 3-D volume rendering; LLC unfolding is partial (needs XC/YC in the run dir)
-
-## PyPI release
-
-```bash
-# bump version in mdsview/__init__.py and pyproject.toml
-pip install build twine
-python -m build
-twine upload --repository testpypi dist/*
-twine upload dist/*
-```
-
-Add screenshots under `docs/images/` before publishing.
 
 ## License
 
