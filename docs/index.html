@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mdsview — MITgcm MDS viewer</title>
+  <meta name="description" content="Browse, plot, and compare MITgcm MDS binary output from the CLI or an optional GUI.">
+  <link rel="icon" href="images/logo.png" type="image/png">
+  <style>
+    :root {
+      --bg: #181a1f;
+      --surface: #1e2128;
+      --card: #252830;
+      --border: #363b47;
+      --text: #e4e6eb;
+      --muted: #8b92a0;
+      --accent: #4c8bf5;
+      --accent-hover: #6ba1ff;
+      --code-bg: #14161a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-hover); }
+    .wrap {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    header { margin-bottom: 2rem; }
+    header img { width: 280px; height: auto; display: block; }
+    .tagline {
+      font-size: 1.15rem;
+      color: var(--muted);
+      max-width: 42rem;
+      margin: 1rem 0 1.25rem;
+    }
+    .badges { margin: 1rem 0 2rem; }
+    .badges a { margin-right: 0.35rem; }
+    h2 {
+      font-size: 1.25rem;
+      margin: 2.5rem 0 0.75rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
+    p { max-width: 42rem; }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      overflow-x: auto;
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    code {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 0.9em;
+    }
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin: 1.5rem 0;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.55rem 1rem;
+      border-radius: 8px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--accent-hover); color: #fff; }
+    .btn-ghost {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-ghost:hover { background: var(--card); color: var(--text); }
+    figure {
+      margin: 1.5rem 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+    figcaption {
+      padding: 0.75rem 1rem;
+      font-size: 0.9rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+    ul { padding-left: 1.25rem; max-width: 42rem; }
+    li { margin: 0.35rem 0; }
+    footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="images/logo.png" alt="mdsview">
+      <p class="tagline">
+        Browse, plot, and compare MITgcm MDS (<code>.data</code>/<code>.meta</code>) binary output.
+        CLI for clusters, optional GUI for your laptop.
+      </p>
+      <div class="badges">
+        <a href="https://pypi.org/project/mdsview/"><img src="https://img.shields.io/pypi/v/mdsview.svg" alt="PyPI version"></a>
+        <a href="https://pypi.org/project/mdsview/"><img src="https://img.shields.io/pypi/dm/mdsview.svg" alt="PyPI downloads"></a>
+        <img src="https://img.shields.io/badge/python-3.9%2B-blue.svg" alt="Python 3.9+">
+        <a href="https://github.com/rhettadam/mdsview/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+      </div>
+      <div class="links">
+        <a class="btn btn-primary" href="https://pypi.org/project/mdsview/">Install from PyPI</a>
+        <a class="btn btn-ghost" href="https://github.com/rhettadam/mdsview">View on GitHub</a>
+        <a class="btn btn-ghost" href="https://github.com/rhettadam/mdsview/blob/main/README.md">Full README</a>
+      </div>
+    </header>
+
+    <main>
+      <h2>Install</h2>
+      <pre>pip install mdsview              # CLI (headless)
+pip install "mdsview[gui]"       # + desktop GUI</pre>
+
+      <h2>Quick start</h2>
+      <pre>mdsview info -d /path/to/run
+mdsview plot -v T -i 480 -l 4 -d /path/to/run
+mdsview plot -v T -i 480 -l 4 --save-figure t.png --no-show
+mdsview gui -d /path/to/run</pre>
+      <p>
+        <code>-d</code> is the run directory. <code>-v</code> is the field name (<code>T</code>, <code>S</code>, <code>Eta</code>, …).
+        Run <code>mdsview COMMAND --help</code> for options.
+      </p>
+
+      <h2>GUI</h2>
+      <figure>
+        <img src="images/gui-overview.png" alt="mdsview main window">
+        <figcaption>Catalog, field plots, diffs, DiD, playback, and GIF export.</figcaption>
+      </figure>
+
+      <h2>Features</h2>
+      <ul>
+        <li>Catalog runs from <code>.meta</code> files only (safe on huge directories)</li>
+        <li>Plot 2-D slices with XC/YC coordinates</li>
+        <li>Diff snapshots or compute difference-of-differences</li>
+        <li>Headless PNG export for HPC batch jobs</li>
+        <li>Synthetic sample data via <code>generate-sample</code></li>
+      </ul>
+
+      <h2>Sample data</h2>
+      <pre>mdsview generate-sample -o sample_data --preset demo</pre>
+    </main>
+
+    <footer>
+      MIT License. Copyright &copy; 2026 Rhett R. Adam.
+      <a href="https://github.com/rhettadam/mdsview">Source</a>
+      &middot;
+      <a href="https://pypi.org/project/mdsview/">PyPI</a>
+    </footer>
+  </div>
+</body>
+</html>
