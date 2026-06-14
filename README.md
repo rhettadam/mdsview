@@ -1,10 +1,12 @@
 <img src="https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/logo.png" alt="mdsview logo" width="280">
 
-Browse, plot, and compare MITgcm MDS (`.data`/`.meta`) binary output. Use the CLI on a cluster or the optional GUI on your laptop.
+Browse, plot, and compare MITgcm MDS (`.data`/`.meta`) binary output. Use the CLI on a cluster or the optional GUI on your laptop or PC.
 
 [![PyPI version](https://img.shields.io/pypi/v/mdsview.svg)](https://pypi.org/project/mdsview/)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+**Site:** [rhettadam.github.io/mdsview](https://rhettadam.github.io/mdsview/)
 
 [MITgcm](https://mitgcm.org/) (MIT General Circulation Model) is a widely used ocean and climate model. A typical run writes out many 3-D fields (temperature, salinity, sea surface height, velocities) at regular time steps, often from MPI jobs on a cluster. The default binary format is **MDS**: each field is a **`.meta`** file (dimensions, precision, iteration) plus a **`.data`** file (raw array, usually big-endian float32). Tiled MPI output adds more filename suffixes but the same basic layout.
 
