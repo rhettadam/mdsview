@@ -5,11 +5,26 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "mdsview"
 version = "0.2.0"
-description = "View and analyze MITgcm MDS (.data/.meta) binary output"
+description = "Browse, plot, and compare MITgcm MDS binary output from the CLI or an optional GUI."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Rhett R. Adam", email = "rhettradam@gmail.com" }]
+keywords = ["mitgcm", "ocean", "climate", "mds", "visualization", "hpc", "netcdf"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Visualization",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: Oceanography",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "numpy>=1.20",
     "matplotlib>=3.5",
@@ -34,3 +49,6 @@ Issues = "https://github.com/rhettadam/mdsview/issues"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["mdsview*"]
+
+[tool.setuptools.package-data]
+mdsview = ["assets/*.png"]

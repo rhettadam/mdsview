@@ -334,10 +334,17 @@ def cmd_dod(args: argparse.Namespace) -> int:
             print(f"Wrote {out_base}.data / {out_base}.meta")
 
         if args.plot or args.output:
+            shape = io.field_info(data_dir, var_a).shape
+            plot_level = args.level if args.level is not None else plotting.effective_level(shape, None)
+            title = plotting.format_dod_title(
+                var_a, var_b, time1, time2,
+                level=plot_level,
+                shape=shape,
+            )
             plotting.plot_array(
                 result,
                 data_dir,
-                title=formula,
+                title=title,
                 level=args.level,
                 cmap=args.cmap,
                 vmin=args.vmin,

@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk
 
 import customtkinter as ctk
+from PIL import Image
 
 APP_NAME = "mdsview"
+LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
+LOGO_HEIGHT = 44
 
 # Dark neutral shell — cool grays, restrained blue accent
 COLORS = {
@@ -55,6 +59,17 @@ CTK = {
 def init_app() -> None:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
+
+
+def load_logo_image(*, height: int = LOGO_HEIGHT) -> ctk.CTkImage | None:
+    """Return a CTkImage for the app logo, or None if the file is missing."""
+    if not LOGO_PATH.is_file():
+        return None
+    with Image.open(LOGO_PATH) as img:
+        source = img.copy()
+    aspect = source.width / max(source.height, 1)
+    size = (max(1, int(height * aspect)), height)
+    return ctk.CTkImage(light_image=source, dark_image=source, size=size)
 
 
 def configure_matplotlib() -> None:

@@ -346,9 +346,16 @@ class MdsViewApp(ctk.CTk):
         inner.pack(fill=tk.BOTH, expand=True, padx=16, pady=10)
         inner.grid_columnconfigure(1, weight=1)
 
-        ctk.CTkLabel(inner, text=G.APP_NAME, font=G.FONTS["brand"], text_color=C["text"]).grid(
-            row=0, column=0, sticky="w", padx=(0, 20)
-        )
+        logo = G.load_logo_image()
+        if logo is not None:
+            self._logo_image = logo
+            ctk.CTkLabel(inner, image=logo, text="").grid(
+                row=0, column=0, sticky="w", padx=(0, 20)
+            )
+        else:
+            ctk.CTkLabel(inner, text=G.APP_NAME, font=G.FONTS["brand"], text_color=C["text"]).grid(
+                row=0, column=0, sticky="w", padx=(0, 20)
+            )
         G.entry_field(inner, self.data_dir).grid(row=0, column=1, sticky="ew", padx=(0, 10))
         btns = ctk.CTkFrame(inner, fg_color="transparent")
         btns.grid(row=0, column=2, sticky="e")
@@ -1261,9 +1268,12 @@ class MdsViewApp(ctk.CTk):
         vmin_in = self._playback_vmin if use_locked else self._parse_float(self.plot_vmin.get())
         vmax_in = self._playback_vmax if use_locked else self._parse_float(self.plot_vmax.get())
         self._clear_figure()
+        shape = self._shape_for(self.data_dir.get(), prefix)
         plotting.draw_slice_on_ax(
             self.ax, field2d, self.data_dir.get(),
-            title=f"{prefix} · iter {iteration}{self._level_phrase(prefix, level)}",
+            title=plotting.format_field_title(
+                prefix, iteration, level=level, shape=shape,
+            ),
             cmap=self.plot_cmap.get(),
             vmin=vmin_in,
             vmax=vmax_in,
@@ -1277,7 +1287,7 @@ class MdsViewApp(ctk.CTk):
         else:
             iter_slider.set_value(iteration)
         self._set_view(
-            f"{prefix}  ·  iteration {iteration}{self._level_phrase(prefix, level)}",
+            plotting.format_field_title(prefix, iteration, level=level, shape=shape),
             plotting.format_cmap_limits_meta(
                 self.plot_cmap.get(), field2d, vmin_in, vmax_in,
             ),
@@ -1620,15 +1630,16 @@ class MdsViewApp(ctk.CTk):
             vmax_in = self._parse_float(self.diff_vmax.get())
             self._clear_figure()
             same_dir = os.path.abspath(later_dir) == os.path.abspath(earlier_dir)
-            if same_dir:
-                title = f"{prefix}({later}) − {prefix}({earlier})"
-                meta_line = f"iter {later} − {earlier}  ·  level {level}"
-            else:
-                title = (
-                    f"{prefix}({later}@{self._short_dir(later_dir)}) − "
-                    f"{prefix}({earlier}@{self._short_dir(earlier_dir)})"
-                )
-                meta_line = f"{self._short_dir(later_dir)}@{later} − {self._short_dir(earlier_dir)}@{earlier}  ·  level {level}"
+            shape = self._shape_for(later_dir, prefix)
+            title = plotting.format_diff_title(
+                prefix,
+                later,
+                earlier,
+                level=level,
+                shape=shape,
+                later_tag="" if same_dir else f"@{self._short_dir(later_dir)}",
+                earlier_tag="" if same_dir else f"@{self._short_dir(earlier_dir)}",
+            )
             plotting.plot_array(
                 diff, later_dir,
                 title=title,
@@ -1640,8 +1651,10 @@ class MdsViewApp(ctk.CTk):
             self.canvas.draw()
             self._update_field_stats(diff2d)
             self._set_view(
-                f"Δ {prefix}",
-                f"{meta_line}  ·  {plotting.format_cmap_limits_meta(self.diff_cmap.get(), diff2d, vmin_in, vmax_in, symmetric=True)}",
+                title,
+                plotting.format_cmap_limits_meta(
+                    self.diff_cmap.get(), diff2d, vmin_in, vmax_in, symmetric=True,
+                ),
             )
             self._log(f"Diff {prefix}")
         except Exception as exc:
@@ -1680,8 +1693,10 @@ class MdsViewApp(ctk.CTk):
             vmin_in = self._parse_float(self.dod_vmin.get())
             vmax_in = self._parse_float(self.dod_vmax.get())
             self._clear_figure()
+            shape = self._shape_for(self.data_dir.get(), var_a)
+            title = plotting.format_dod_title(var_a, var_b, t1, t2, level=level, shape=shape)
             plotting.plot_array(
-                result, self.data_dir.get(), title="DiD", level=0, cmap=self.dod_cmap.get(),
+                result, self.data_dir.get(), title=title, level=0, cmap=self.dod_cmap.get(),
                 vmin=vmin_in, vmax=vmax_in,
                 symmetric=True, ax=self.ax, show=False,
                 **self._grid_plot_kwargs(),
@@ -1690,9 +1705,9 @@ class MdsViewApp(ctk.CTk):
             summary = ops.stats(np.asarray(result))
             self._update_field_stats(result2d)
             self._set_view(
-                f"DiD  ·  level {level}",
+                title,
                 (
-                    f"({var_b}−{var_a})@t1 − ({var_b}−{var_a})@t2   ·   mean {summary['mean']:.4g}"
+                    f"mean {summary['mean']:.4g}"
                     f"  ·  {plotting.format_cmap_limits_meta(self.dod_cmap.get(), result2d, vmin_in, vmax_in, symmetric=True)}"
                 ),
             )

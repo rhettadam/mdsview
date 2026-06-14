@@ -1,153 +1,212 @@
-# mdsview
+<p align="center">
+  <img src="https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/logo.png" alt="mdsview logo" width="120">
+</p>
 
-Quick visualization and analysis of MITgcm MDS (`.data`/`.meta`) binary output.
+Browse, plot, and compare MITgcm MDS (`.data`/`.meta`) binary output. Use the CLI on a cluster or the optional GUI on your laptop.
 
-## Feasibility
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-This is very feasible. MITgcm binary output is a well-documented paired format:
+[MITgcm](https://mitgcm.org/) (MIT General Circulation Model) is a widely used ocean and climate model. A typical run writes out many 3-D fields (temperature, salinity, sea surface height, velocities) at regular time steps, often from MPI jobs on a cluster. The default binary format is **MDS**: each field is a **`.meta`** file (dimensions, precision, iteration) plus a **`.data`** file (raw array, usually big-endian float32). Tiled MPI output adds more filename suffixes but the same basic layout.
 
-- **`.meta`** — ASCII header with dimensions, precision, iteration, record count
-- **`.data`** — raw binary array (typically big-endian float32)
+After a run you usually have a directory with hundreds or thousands of these file pairs and no built-in viewer. MITgcm ships [`MITgcmutils`](https://github.com/MITgcm/MITgcm/tree/master/utils/python/MITgcmutils) for reading and writing MDS in Python, but you still need scripts to list what's there, pick an iteration and level, plot a slice, or subtract two snapshots. mdsview fills that gap: catalog a run folder without loading `.data`, plot 2-D slices with grid coordinates, diff two times or two variables (DiD), and export figures or new MDS files from the terminal on a headless node or from a local GUI.
 
-The official [`MITgcmutils`](https://github.com/MITgcm/MITgcm/tree/master/utils/python/MITgcmutils) package already handles tiled MPI output, meta parsing, and read/write. This tool wraps that for common workflows.
-
-For large LLC or high-frequency output, consider [`xmitgcm`](https://xmitgcm.readthedocs.io/) (lazy xarray/dask loading). mdsview targets quick inspection of run directories.
+For huge LLC runs or lazy xarray loading, use [`xmitgcm`](https://xmitgcm.readthedocs.io/). mdsview targets quick inspection of run directories.
 
 ## Install
 
 ```bash
+pip install mdsview
+pip install "mdsview[gui]"    # optional desktop GUI
+```
+
+From source:
+
+```bash
+git clone https://github.com/rhettadam/mdsview.git
+cd mdsview
 pip install -e .
+pip install -e ".[gui]"
 ```
 
-On Windows, if `mdsview` is not found, run via module instead:
+On Windows, if `mdsview` is not on PATH:
 
 ```bash
-python -m mdsview.cli info -d /path/to/run
+python -m mdsview.cli info -d C:\path\to\run
 ```
 
-## Sample data (no MITgcm run required)
+Requires Python 3.9+, NumPy, matplotlib, MITgcmutils, cmocean, Pillow. GUI needs CustomTkinter.
 
-Generate a synthetic run directory with realistic 3-D structure (thermocline,
-halocline, etc.) and spatially varying DiD patterns for T vs S:
-
-```bash
-# Recommended: ~150 MB, 40 levels, visible DoD plots
-python -m mdsview.cli generate-sample -o sample_data --preset demo
-
-# Fast CI-sized set
-python -m mdsview.cli generate-sample -o sample_tiny --preset tiny
-
-# Larger sets if you have disk space
-python -m mdsview.cli generate-sample -o sample_medium --preset medium
-python -m mdsview.cli generate-sample -o sample_large --preset large
-python -m mdsview.cli generate-sample -o sample_stress --preset stress
-
-# MPI-style tiled 3D output
-python -m mdsview.cli generate-sample -o sample_tiled --preset tiled
-
-# Catalog stress test (~20,000 .data/.meta files; small grid, 2000 snapshots × 5 fields)
-python -m mdsview.cli generate-sample -o sample_data_many --preset many_files
-
-# Faster variant: one field, still thousands of files (~4,000 files at 2000 iters)
-python -m mdsview.cli generate-sample -o sample_data_many --preset many_files --variables T --n-iters 2000
-
-# Diff / cross-run testing (~40 MB pair: ref/ + warm/)
-python -m mdsview.cli generate-sample -o sample_data_diff --preset diff_demo --diff-pair
-```
-
-Then try (see `sample_data/SAMPLE_README.txt` for recommended level & times):
+## Quick start
 
 ```bash
-python -m mdsview.cli info -d sample_data
-python -m mdsview.cli plot -v T -i 2520 -l 20 -d sample_data --save-figure t.png --no-show
-python -m mdsview.cli dod -a T -b S --time1 0 --time2 2520 -l 20 --plot --no-show --save-figure dod.png -d sample_data
-python -m mdsview.cli gui -d sample_data
-```
-
-T and S use different spatial warming rates, so **DiD(T,S) varies in x and y** (not a flat field).
-
-Presets:
-
-| Preset | Grid (nx×ny×nz) | Iterations | ~Total size |
-|--------|-----------------|------------|-------------|
-| tiny | 80×60×12 | 5 | ~5 MB |
-| **demo** | **240×160×40** | **8** | **~150 MB** |
-| diff_demo | 128×96×20 | 6 | ~40 MB (use `--diff-pair` for ref/ + warm/) |
-| small | 180×120×32 | 10 | ~100 MB |
-| medium | 360×240×50 | 24 | ~1.5 GB |
-| large | 900×600×50 | 12 | ~6 GB |
-| stress | 1800×1200×50 | 6 | ~12 GB |
-| tiled | 180×120×16 (3×2 tiles) | 8 | ~50 MB |
-| many_files | 64×48×8 | 2000 | ~1 GB (20k files) |
-
-## CLI cheat sheet
-
-All commands accept `-d FOLDER` for the run directory (default: current folder).
-Use `-v NAME` for the variable (T, S, Eta, …). Run `python -m mdsview.cli COMMAND --help` for full details and examples.
-
-```bash
-# Browse variables (reads .meta only)
-python -m mdsview.cli info
-python -m mdsview.cli info -v T
-python -m mdsview.cli info -v T --show-meta
-
-# Plot a snapshot
-python -m mdsview.cli plot -v T -i 480 -l 4 --save-figure t.png --no-show
-
-# Same variable, two times:  field(later) − field(earlier)
-python -m mdsview.cli diff -v T --later 480 --earlier 0 --plot
-
-# Two variables, two times (difference-of-differences)
-python -m mdsview.cli dod -a T -b S --time1 0 --time2 480
-
-# Graphical interface
-python -m mdsview.cli gui
-```
-
-## What works today
-
-| Feature | Status |
-|---------|--------|
-| Read tiled/global MDS output | Yes (via MITgcmutils) |
-| Plot 2D slices with XC/YC | Yes |
-| Diff two iterations | Yes |
-| Combine (stack) iterations | Yes |
-| Write diff/combined MDS | Yes |
-| Interactive GUI | Yes (tkinter + matplotlib) |
-| 3D volume rendering | Not yet |
-| NetCDF / MNC tiled glue | Not yet (use MITgcm `gluemnc`) |
-| LLC face unfolding | Partial (coords if XC/YC exist) |
-
-## Server / batch use (Linux, HPC)
-
-Install without the GUI (smaller footprint):
-
-```bash
-pip install -e .
-# optional GUI later: pip install -e ".[gui]"
-```
-
-CLI defaults to the **Agg** matplotlib backend (no display). Use `--save-figure` and `--no-show` for plots:
-
-```bash
-export MPLBACKEND=Agg   # optional; set automatically for non-gui commands
 mdsview info -d /path/to/run
-mdsview plot -v T -i 0 -l 20 -d /path/to/run --save-figure t.png --no-show
-mdsview diff -v T --later 480 --earlier 0 -l 20 --save-figure diff.png --no-show
-mdsview dod -a T -b S --time1 0 --time2 2520   # stats only, level-by-level I/O
+mdsview plot -v T -i 480 -l 4 -d /path/to/run
+mdsview plot -v T -i 480 -l 4 --save-figure t.png --no-show -d /path/to/run   # headless
+mdsview gui -d /path/to/run
 ```
 
-Memory notes:
+`-d FOLDER` is the run directory (default: `.`). `-v NAME` is the field prefix (`T`, `S`, `Eta`, …). Most commands accept `--json`. Run `mdsview COMMAND --help` for options.
 
-- `info` and catalog scans read **`.meta` filenames only** (safe with thousands of snapshots).
-- `plot` and `diff` at a single `--level` read **one horizontal slab** per snapshot, not the full 3-D volume.
-- `dod` computes level-by-level; full 3-D output uses a **memmap temp file**, not four full arrays in RAM.
-- `combine` loads every listed iteration — intended for small tests only.
+## Sample data
 
-Errors print to stderr with exit code 1; set `MDSVIEW_DEBUG=1` to see tracebacks.
+Synthetic run directories for testing without MITgcm:
+
+```bash
+mdsview generate-sample -o sample_data --preset demo
+```
+
+See `sample_data/SAMPLE_README.txt` after generation. Other presets and options: `mdsview generate-sample --help`.
+
+## CLI
+
+### `info`
+
+List variables or show metadata. Reads `.meta` only, safe with thousands of snapshots.
+
+```bash
+mdsview info
+mdsview info -v T
+mdsview info -v T --show-meta
+mdsview info -v T --json
+```
+
+### `plot`
+
+One 2-D slice. With `--level`, reads a single horizontal slab, not the full volume.
+
+```bash
+mdsview plot -v T -i 480 -l 4
+mdsview plot -v Eta -i last
+mdsview plot -v T -i 0 -l 10 --cmap haline --vmin 0 --vmax 30 --save-figure out.png --no-show
+mdsview plot -v T -i 0 --no-coords    # index axes, not XC/YC
+```
+
+### `diff`
+
+`field(LATER) − field(EARLIER)`. Default is one slice; `--save-field` without `--level` loads full volumes.
+
+```bash
+mdsview diff -v T --later 2520 --earlier 0 -l 20
+mdsview diff -v T --later 2520 --earlier 0 -l 20 --plot --save-figure diff.png --no-show
+mdsview diff -v T --later 2520 --earlier 0 --save-field T_diff
+mdsview diff -v T 480 0 -l 4          # positional iters also work
+```
+
+### `dod`
+
+Difference-of-differences: `(B@t1 − A@t1) − (B@t2 − A@t2)`. Stats stream level-by-level; full 3-D output uses a memmap temp file.
+
+```bash
+mdsview dod -a T -b S --time1 0 --time2 2520
+mdsview dod -a T -b S --time1 0 --time2 2520 -l 20 --plot --save-figure dod.png --no-show
+mdsview dod -a T -b S --time1 0 --time2 2520 --save-field DiD_TS
+mdsview dod -a UVEL -b VVEL --time1 0 --time2 120 --rec 0
+```
+
+### `combine`
+
+Stack iterations into one array. Loads every listed iteration; use for small tests only.
+
+```bash
+mdsview combine -v T --iterations 0,360,720 --save-field T_stack
+```
+
+### `generate-sample`
+
+Create synthetic `.data`/`.meta` for tests. See [Sample data](#sample-data).
+
+### Plot options
+
+Used by `plot`, `diff`, and `dod`:
+
+- `-l`, `--level K`: vertical index (0 = top)
+- `--cmap`: default `thermal` (plot) or `balance` (diff/dod); matplotlib + cmocean names
+- `--vmin`, `--vmax`
+- `--save-figure FILE`, `--no-show`
+
+Diff/dod plots use a symmetric diverging scale. Full list: `mdsview/colormaps.py`.
+
+## GUI
+
+```bash
+pip install "mdsview[gui]"
+mdsview gui -d /path/to/run
+```
+
+![Main window](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-overview.png)
+
+Run directory at the top. Left icons switch panels; controls sit beside the plot. Stats (min, mean, max, std) update with each field.
+
+![Catalog](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-catalog.png)
+
+Lists every variable in the run. Selecting one shows metadata below; double-click or **Plot selected** opens it in Field.
+
+![Field + playback](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-field-playback.png)
+
+Pick variable, iteration, and level. Sliders auto-refresh the plot. Footer controls step through time or export a GIF.
+
+![Grid](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-grid.png)
+
+Preview XC/YC (or other grid files) and optionally overlay grid lines on field plots.
+
+![Diff](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-diff.png)
+
+Subtract an earlier snapshot from a later one. Later and earlier can live in different run directories.
+
+![DiD](https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/gui-dod.png)
+
+Plot or export the difference-of-differences between two variables at two times. **Volume stats** runs the same streaming calculation as `mdsview dod` without `--plot`.
+
+Top bar: **Open** (`Ctrl+O`), **Refresh** (`Ctrl+R`), **PNG** (`Ctrl+S`), **GIF** (export dialog). Matplotlib pan/zoom sits under the plot.
+
+## HPC / batch
+
+CLI uses the Agg backend by default (no display). Use `--save-figure` and `--no-show`:
+
+```bash
+mdsview info -d /scratch/run001
+mdsview plot -v T -i last -l 20 -d /scratch/run001 --save-figure t.png --no-show
+mdsview dod -a T -b S --time1 0 --time2 2520 --json -d /scratch/run001
+```
+
+Exit codes: `0` ok, `1` error, `2` bad args, `130` interrupt. Errors go to stderr. Tracebacks: `MDSVIEW_DEBUG=1`.
+
+### Memory
+
+- `info`: `.meta` filenames only
+- `plot` / `diff` with `-l`: one slab per snapshot
+- `dod` stats: level-by-level
+- `dod` / `diff --save-field` (no level): full volume; `combine`: all listed iters in RAM
+
+## Python API
+
+```python
+from mdsview import io, ops, plotting
+
+slab = io.read_level_slice("/path/to/run", "T", 480, level=4)
+diff2d, meta = ops.diff_slice("/path/to/run", "T", later=480, earlier=0, level=4)
+plotting.plot_field("/path/to/run", "T", 480, level=4, save="t.png", show=False)
+```
 
 ## Limitations
 
-- Assumes standard MDS output, not `pkg/mnc` NetCDF tiles (use `gluemnc` first).
-- Multi-record diagnostics: `dod --rec`; extend other subcommands as needed.
-- `combine` and full-volume `diff --save-field` (no `--level`) load entire snapshots into memory.
+- Standard MDS only, not `pkg/mnc` tiles (use `gluemnc` first)
+- `dod --rec` for multi-record files; other commands may need extending
+- No 3-D volume rendering; LLC unfolding is partial (needs XC/YC in the run dir)
+
+## PyPI release
+
+```bash
+# bump version in mdsview/__init__.py and pyproject.toml
+pip install build twine
+python -m build
+twine upload --repository testpypi dist/*
+twine upload dist/*
+```
+
+Add screenshots under `docs/images/` before publishing.
+
+## License
+
+MIT License. See [LICENSE](LICENSE). Copyright (c) 2026 Rhett R. Adam.

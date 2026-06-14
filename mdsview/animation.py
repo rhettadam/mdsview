@@ -104,6 +104,7 @@ def save_playback_gif(
 
     duration_ms = max(int(1000 / max(fps, 0.1)), 50)
     total = len(iterations)
+    field_shape = io.field_info(data_dir, prefix).shape
 
     with tempfile.TemporaryDirectory(prefix="mdsview_gif_") as tmpdir:
         frame_paths: list[str] = []
@@ -111,7 +112,9 @@ def save_playback_gif(
         try:
             for i, iteration in enumerate(iterations):
                 field2d = io.read_level_slice(data_dir, prefix, iteration, level)
-                title = f"{prefix} @ iter {iteration} (level {level})"
+                title = plotting.format_field_title(
+                    prefix, iteration, level=level, shape=field_shape,
+                )
                 plotting.draw_slice_on_ax(
                     ax,
                     field2d,

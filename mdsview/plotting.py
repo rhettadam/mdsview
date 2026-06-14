@@ -15,6 +15,67 @@ from .slices import level_axis, pick_2d_slice
 _pick_2d_slice = pick_2d_slice
 
 
+def effective_level(shape: tuple[int, ...], level: int | None) -> int | None:
+    """Level index shown on a plot; None for 2-D fields."""
+    _, nz = level_axis(shape)
+    if nz <= 1:
+        return None
+    if level is None:
+        return nz // 2
+    return max(0, min(nz - 1, int(level)))
+
+
+def format_field_title(
+    prefix: str,
+    iteration: int | None = None,
+    *,
+    level: int | None = None,
+    shape: tuple[int, ...] | None = None,
+) -> str:
+    parts = [prefix]
+    if iteration is not None:
+        parts.append(f"iter {iteration}")
+    lev = effective_level(shape, level) if shape is not None else level
+    if lev is not None:
+        parts.append(f"level {lev}")
+    return ", ".join(parts)
+
+
+def format_diff_title(
+    prefix: str,
+    later: int,
+    earlier: int,
+    *,
+    level: int | None = None,
+    shape: tuple[int, ...] | None = None,
+    later_tag: str = "",
+    earlier_tag: str = "",
+) -> str:
+    later_str = f"{later}{later_tag}"
+    earlier_str = f"{earlier}{earlier_tag}"
+    parts = [prefix, f"iter {later_str} - {earlier_str}"]
+    lev = effective_level(shape, level) if shape is not None else level
+    if lev is not None:
+        parts.append(f"level {lev}")
+    return ", ".join(parts)
+
+
+def format_dod_title(
+    var_a: str,
+    var_b: str,
+    time1: int,
+    time2: int,
+    *,
+    level: int | None = None,
+    shape: tuple[int, ...] | None = None,
+) -> str:
+    parts = [f"({var_b} - {var_a})", f"t1={time1}", f"t2={time2}"]
+    lev = effective_level(shape, level) if shape is not None else level
+    if lev is not None:
+        parts.append(f"level {lev}")
+    return ", ".join(parts)
+
+
 def _resolve_clim(
     field2d: np.ndarray,
     vmin: float | None,
@@ -148,17 +209,16 @@ def plot_field(
         fig = ax.figure
 
     if title is None:
-        if iteration is not None:
-            title = f"{prefix} @ iter {iteration}"
-        elif its:
-            title = f"{prefix} @ iter {its[-1]}"
-        else:
-            title = prefix
-        _, nz = level_axis(field2d.shape if field2d.ndim == 2 else io.field_info(data_dir, prefix).shape)
-        if nz > 1 and level is not None:
-            title += f" (level {level})"
-        elif nz > 1:
-            title += f" (level {nz // 2})"
+        info_shape = io.field_info(data_dir, prefix).shape
+        plot_iter = iteration
+        if plot_iter is None and its:
+            plot_iter = its[-1]
+        title = format_field_title(
+            prefix,
+            plot_iter,
+            level=level,
+            shape=info_shape,
+        )
 
     draw_slice_on_ax(
         ax,
@@ -261,9 +321,8 @@ def plot_diff(
     else:
         fig = ax.figure
 
-    title = f"{prefix}: iter {iteration_a} - {iteration_b}"
-    if level is not None:
-        title += f" (level {level})"
+    shape = io.field_info(data_dir, prefix).shape
+    title = format_diff_title(prefix, iteration_a, iteration_b, level=level, shape=shape)
 
     draw_slice_on_ax(
         ax,
