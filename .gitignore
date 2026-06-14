@@ -1,0 +1,25 @@
+# Generated sample data (local)
+sample_data/
+sample_data_*/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Test / tooling
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
