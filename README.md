@@ -1,6 +1,4 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/logo.png" alt="mdsview logo" width="120">
-</p>
+<img src="https://raw.githubusercontent.com/rhettadam/mdsview/main/docs/images/logo.png" alt="mdsview logo" width="280">
 
 Browse, plot, and compare MITgcm MDS (`.data`/`.meta`) binary output. Use the CLI on a cluster or the optional GUI on your laptop.
 
