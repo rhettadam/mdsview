@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import ttk
 
@@ -12,6 +14,10 @@ from PIL import Image
 APP_NAME = "mdsview"
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo.png"
 LOGO_HEIGHT = 44
+
+# Populated by resolve_fonts() at startup
+UI_FONT = "sans-serif"
+MONO_FONT = "monospace"
 
 # Dark neutral shell — cool grays, restrained blue accent
 COLORS = {
@@ -35,9 +41,6 @@ COLORS = {
     "status_bg": "#14161a",
 }
 
-UI_FONT = "Segoe UI"
-MONO_FONT = "Consolas"
-
 FONTS = {
     "brand": (UI_FONT, 26, "bold"),
     "heading": (UI_FONT, 14, "bold"),
@@ -46,6 +49,7 @@ FONTS = {
     "small": (UI_FONT, 10),
     "mono": (MONO_FONT, 11),
     "stat": (MONO_FONT, 12),
+    "nav": (UI_FONT, 11),
 }
 
 CTK = {
@@ -56,9 +60,43 @@ CTK = {
 }
 
 
-def init_app() -> None:
+def init_app(root: tk.Misc | None = None) -> None:
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
+    resolve_fonts(root)
+
+
+def resolve_fonts(root: tk.Misc | None = None) -> None:
+    """Pick UI fonts available on this system (Linux-friendly fallbacks)."""
+    global UI_FONT, MONO_FONT, FONTS
+
+    if root is not None:
+        families = set(tkfont.families(root))
+    else:
+        families = set()
+
+    if sys.platform.startswith("win"):
+        ui_candidates = ("Segoe UI", "DejaVu Sans", "Arial", "TkDefaultFont")
+        mono_candidates = ("Consolas", "DejaVu Sans Mono", "Courier New", "TkFixedFont")
+    elif sys.platform == "darwin":
+        ui_candidates = ("SF Pro Text", "Helvetica Neue", "Helvetica", "Arial")
+        mono_candidates = ("Menlo", "Monaco", "Courier New")
+    else:
+        ui_candidates = ("DejaVu Sans", "Liberation Sans", "Ubuntu", "Noto Sans", "Arial")
+        mono_candidates = ("DejaVu Sans Mono", "Liberation Mono", "Ubuntu Mono", "Courier New")
+
+    UI_FONT = next((name for name in ui_candidates if name in families), "sans-serif")
+    MONO_FONT = next((name for name in mono_candidates if name in families), "monospace")
+    FONTS = {
+        "brand": (UI_FONT, 26, "bold"),
+        "heading": (UI_FONT, 14, "bold"),
+        "label": (UI_FONT, 12),
+        "caption": (UI_FONT, 11),
+        "small": (UI_FONT, 10),
+        "mono": (MONO_FONT, 11),
+        "stat": (MONO_FONT, 12),
+        "nav": (UI_FONT, 11),
+    }
 
 
 def load_logo_image(*, height: int = LOGO_HEIGHT) -> ctk.CTkImage | None:
@@ -155,13 +193,13 @@ def nav_button(parent, text: str, command) -> ctk.CTkButton:
         parent,
         text=text,
         command=command,
-        width=52,
-        height=52,
-        font=(UI_FONT, 16),
+        width=76,
+        height=34,
+        font=FONTS["nav"],
         fg_color="transparent",
         hover_color=COLORS["accent_soft"],
         text_color=COLORS["muted"],
-        corner_radius=10,
+        corner_radius=8,
     )
 
 

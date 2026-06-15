@@ -81,3 +81,23 @@ def test_cli_bad_iteration(sample_dir):
     )
     assert result.returncode == 1
     assert "999999" in result.stderr
+
+
+def test_cli_diff_cross_dir(sample_dir, tmp_path):
+    import shutil
+
+    other = tmp_path / "other_run"
+    shutil.copytree(sample_dir, other)
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "mdsview.cli", "diff",
+            "-d", str(sample_dir), "--dir-b", str(other),
+            "-v", "T", "--later", "240", "--earlier", "240", "-l", "0", "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "@other_run" in result.stdout
+    assert '"operation": "subtract_slice"' in result.stdout

@@ -1,11 +1,10 @@
-import os
 import tempfile
 
 import numpy as np
 import pytest
 
 from mdsview import io, ops
-from mdsview.samples.generate import expected_dod_has_structure, expected_dod_mean, generate_sample_run
+from mdsview.samples.generate import generate_sample_run
 
 
 @pytest.fixture
@@ -67,33 +66,6 @@ def test_diff_slice_cross_dir(sample_dir, tmp_path):
     assert diff.shape == (60, 80)
     assert meta["data_dir_a"] != meta["data_dir_b"]
     np.testing.assert_allclose(diff, 0.0, atol=1e-6)
-
-
-def test_dod_known_answer(sample_dir):
-    t1, t2 = 0, 480
-    stats = ops.streaming_stats(sample_dir, "T", "S", t1, t2)
-    expected = expected_dod_mean("T", "S", t1, t2)
-    assert expected is not None
-    assert stats["mean"] == pytest.approx(expected, rel=0.05)
-    assert expected_dod_has_structure("T", "S")
-    assert stats["std"] > 0.05
-
-
-def test_dod_memmap_output(sample_dir):
-    result, meta = ops.difference_of_differences(
-        sample_dir, "T", "S", 0, 480, progress=False
-    )
-    try:
-        assert result.shape == (12, 60, 80)
-        assert meta["operation"] == "difference_of_differences"
-        assert float(np.mean(result)) == pytest.approx(-0.24, rel=0.05)
-        assert float(np.std(result)) > 0.05
-    finally:
-        if hasattr(result, "base") and hasattr(result.base, "close"):
-            result.base.close()
-        mmap_path = meta.get("mmap_path")
-        if mmap_path and os.path.exists(mmap_path):
-            os.unlink(mmap_path)
 
 
 def test_combine_iterations(sample_dir):

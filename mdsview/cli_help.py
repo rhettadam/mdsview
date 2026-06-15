@@ -18,8 +18,20 @@ Examples (run from your MITgcm output folder, or add -d /path/to/run):
   # Diff two times at one level (reads two slabs, not full volumes)
   mdsview diff -v T --later 480 --earlier 0 -l 4 --save-figure diff.png --no-show
 
-  # DiD statistics only (streams level-by-level)
-  mdsview dod -a T -b S --time1 0 --time2 480
+  # Cross-run diff (later run -d, earlier --dir-b)
+  mdsview diff -v T --later 2520 --earlier 2520 -l 20 -d /scratch/warm --dir-b /scratch/ref
+
+  # Export MDS fields to NetCDF
+  mdsview export -v T,S -o run.nc --iterations 0,360,720
+  mdsview export -v T -o surface.nc --iterations all --levels 0
+
+  # Subset to a smaller MDS folder (for transfer or sharing)
+  mdsview extract -v T -o subset/ --iterations 0:1200:120 --levels 0:10
+
+  # Time series at a point or domain mean
+  mdsview timeseries -v T -l 4 --iterations all --at 40,30 -o point.csv
+  mdsview timeseries -v Eta --iterations all --save-figure ssh.png --no-show
+  mdsview timeseries -v T -l 0 --iterations 0:480:120 --json --no-plot
 
   # Open the GUI (requires display + pip install mdsview[gui])
   mdsview gui
@@ -90,4 +102,54 @@ def add_json_flag(parser: argparse.ArgumentParser) -> None:
         "--json",
         action="store_true",
         help="Print machine-readable JSON on stdout",
+    )
+
+
+def add_iterations_arg(parser: argparse.ArgumentParser, *, default: str = "all") -> None:
+    parser.add_argument(
+        "--iterations",
+        "--iters",
+        dest="iterations",
+        default=default,
+        metavar="SPEC",
+        help="Snapshots to export: all, last, comma list, or start:stop[:step]",
+    )
+
+
+def add_levels_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--levels",
+        default=None,
+        metavar="SPEC",
+        help="Vertical levels to export: comma list or start:stop[:step] (default: all)",
+    )
+
+
+def add_region_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--region",
+        default=None,
+        metavar="I0,I1,J0,J1",
+        help="Horizontal index bounds to export",
+    )
+
+
+def add_rec_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--rec",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Record index for multi-record files",
+    )
+
+
+def add_variables_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "-v",
+        "--variables",
+        dest="variables",
+        required=True,
+        metavar="LIST",
+        help="Comma-separated variable names, e.g. T,S,Eta",
     )

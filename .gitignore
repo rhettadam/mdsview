@@ -2,6 +2,9 @@
 sample_data/
 sample_data_*/
 
+# Local NetCDF exports
+*.nc
+
 # Python
 __pycache__/
 *.py[cod]

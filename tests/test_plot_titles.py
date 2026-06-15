@@ -1,4 +1,4 @@
-from mdsview.plotting import format_diff_title, format_dod_title, format_field_title
+from mdsview.plotting import format_diff_title, format_field_title
 
 
 def test_format_field_title_3d():
@@ -26,10 +26,3 @@ def test_format_diff_title_cross_run():
         later_tag="@warm", earlier_tag="@ref",
     )
     assert title == "T, iter 2520@warm - 0@ref, level 20"
-
-
-def test_format_dod_title():
-    assert (
-        format_dod_title("T", "S", 0, 2520, level=20, shape=(40, 160, 240))
-        == "(S - T), t1=0, t2=2520, level 20"
-    )

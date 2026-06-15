@@ -291,7 +291,8 @@ def plot_grid_preview(
     0.98, 0.02, "checkerboard demo", transform=ax.transAxes, fontsize=8,
     color="0.45", horizontalalignment="right", verticalalignment="bottom",
   )
-  fig.tight_layout()
+  if created:
+    fig.tight_layout()
   if show:
     plt.show()
   elif created:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import glob
 import os
 import re
 from collections import defaultdict
@@ -33,21 +32,30 @@ class RunCatalog:
         best_iter: dict[str, int | None] = {}
         sample_meta: dict[str, str] = {}
 
-        for meta_path in glob.glob(os.path.join(data_dir, "*.meta")):
-            base = os.path.basename(meta_path)[:-5]
-            match = _ITER_META_RE.match(base)
-            if match:
-                prefix, itr_str = match.group(1), match.group(2)
-                itr = int(itr_str)
-                iters_map[prefix].append(itr)
-                prev = best_iter.get(prefix)
-                if prev is None or itr >= prev:
-                    best_iter[prefix] = itr
-                    sample_meta[prefix] = meta_path
-            else:
-                iters_map[base]
-                sample_meta[base] = meta_path
-                best_iter.setdefault(base, None)
+        try:
+            with os.scandir(data_dir) as entries:
+                for entry in entries:
+                    if not entry.is_file():
+                        continue
+                    name = entry.name
+                    if not name.endswith(".meta"):
+                        continue
+                    base = name[:-5]
+                    match = _ITER_META_RE.match(base)
+                    if match:
+                        prefix, itr_str = match.group(1), match.group(2)
+                        itr = int(itr_str)
+                        iters_map[prefix].append(itr)
+                        prev = best_iter.get(prefix)
+                        if prev is None or itr >= prev:
+                            best_iter[prefix] = itr
+                            sample_meta[prefix] = entry.path
+                    else:
+                        iters_map[base]
+                        sample_meta[base] = entry.path
+                        best_iter.setdefault(base, None)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
 
         for prefix, itr_list in iters_map.items():
             if itr_list:

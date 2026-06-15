@@ -135,6 +135,9 @@
       <h2>Install</h2>
       <pre>pip install mdsview              # CLI (headless)
 pip install "mdsview[gui]"       # + desktop GUI</pre>
+      <p>
+        Requires Python 3.9+, NumPy, matplotlib, MITgcmutils, cmocean, Pillow, and netCDF4 (for <code>export</code>).
+      </p>
 
       <h2>Quick start</h2>
       <pre>mdsview info -d /path/to/run
@@ -146,23 +149,43 @@ mdsview gui -d /path/to/run</pre>
         Run <code>mdsview COMMAND --help</code> for options.
       </p>
 
+      <h2>CLI highlights</h2>
+      <pre># Diff two snapshots (one level at a time)
+mdsview diff -v T --later 2520 --earlier 0 -l 20 --plot --no-show
+
+# Cross-run diff (later -d, earlier --dir-b)
+mdsview diff -v T --later 2520 --earlier 2520 -l 20 -d /warm --dir-b /ref
+
+# NetCDF export (T and S must share the same MDS shape)
+mdsview export -v T,S -o run.nc --iterations all --levels 0
+
+# Subset to a smaller MDS folder
+mdsview extract -v T -o subset/ --iterations 0:1200:120 --levels 0:10
+
+# Time series with plot + CSV
+mdsview timeseries -v T -l 4 --iterations all --at 40,30 -o point.csv</pre>
+
       <h2>GUI</h2>
       <figure>
         <img src="images/gui-overview.png" alt="mdsview main window">
-        <figcaption>Catalog, field plots, diffs, DiD, playback, and GIF export.</figcaption>
+        <figcaption>Catalog, field plots, grid overlay, playback, and GIF export. Use the CLI for diff and export.</figcaption>
       </figure>
 
       <h2>Features</h2>
       <ul>
         <li>Catalog runs from <code>.meta</code> files only (safe on huge directories)</li>
         <li>Plot 2-D slices with XC/YC coordinates</li>
-        <li>Diff snapshots or compute difference-of-differences</li>
+        <li>Diff snapshots from the CLI, including cross-run (<code>--dir-b</code>)</li>
+        <li>Export to NetCDF with CF-style coordinates (<code>mdsview export</code>)</li>
+        <li>Subset runs to new MDS files (<code>mdsview extract</code>)</li>
+        <li>Point, box, and domain time series with plots (<code>mdsview timeseries</code>)</li>
         <li>Headless PNG export for HPC batch jobs</li>
         <li>Synthetic sample data via <code>generate-sample</code></li>
       </ul>
 
       <h2>Sample data</h2>
       <pre>mdsview generate-sample -o sample_data --preset demo</pre>
+      <p>The repository includes a bundled <code>sample/</code> directory for quick tests.</p>
     </main>
 
     <footer>

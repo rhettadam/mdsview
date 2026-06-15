@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import contextlib
 import os
 
@@ -21,7 +22,7 @@ import numpy as np
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 from . import animation, catalog, grid, gui_theme, io, ops, plotting
-from .colormaps import COLORMAP_CHOICES, DEFAULT_DIFF_CMAP, DEFAULT_PLOT_CMAP
+from .colormaps import COLORMAP_CHOICES, DEFAULT_PLOT_CMAP
 
 C = gui_theme.COLORS
 G = gui_theme
@@ -112,9 +113,17 @@ class _IndexSlider:
         self._set_index(idx, notify=True)
 
     def _snap_value(self, raw: int) -> int:
-        if raw in self.values:
+        if raw in self._value_to_index:
             return raw
-        return min(self.values, key=lambda v: abs(v - raw))
+        if not self.values:
+            return raw
+        idx = bisect.bisect_left(self.values, raw)
+        if idx <= 0:
+            return self.values[0]
+        if idx >= len(self.values):
+            return self.values[-1]
+        before, after = self.values[idx - 1], self.values[idx]
+        return before if raw - before <= after - raw else after
 
     def _set_index(self, idx: int, *, notify: bool) -> None:
         if not self.values:
@@ -223,16 +232,14 @@ class _IndexSlider:
 
 class MdsViewApp(ctk.CTk):
     _NAV = (
-        ("browse", "◫", "Catalog"),
-        ("plot", "◉", "Field"),
-        ("grid", "⊞", "Grid"),
-        ("diff", "△", "Diff"),
-        ("dod", "◎", "DiD"),
+        ("browse", "Catalog"),
+        ("plot", "Field"),
+        ("grid", "Grid"),
     )
 
     def __init__(self, initial_dir: str = ".") -> None:
         super().__init__()
-        G.init_app()
+        G.init_app(self)
 
         self.title(G.APP_NAME)
         self.geometry("1360x900")
@@ -252,25 +259,6 @@ class MdsViewApp(ctk.CTk):
         self.plot_vmin = tk.StringVar()
         self.plot_vmax = tk.StringVar()
 
-        self.diff_later_dir = tk.StringVar(value=os.path.abspath(initial_dir))
-        self.diff_earlier_dir = tk.StringVar(value=os.path.abspath(initial_dir))
-        self.diff_var = tk.StringVar()
-        self.diff_later = tk.StringVar()
-        self.diff_earlier = tk.StringVar()
-        self.diff_level = tk.StringVar(value="0")
-        self.diff_cmap = tk.StringVar(value=DEFAULT_DIFF_CMAP)
-        self.diff_vmin = tk.StringVar()
-        self.diff_vmax = tk.StringVar()
-
-        self.dod_a = tk.StringVar()
-        self.dod_b = tk.StringVar()
-        self.dod_t1 = tk.StringVar()
-        self.dod_t2 = tk.StringVar()
-        self.dod_level = tk.StringVar(value="0")
-        self.dod_cmap = tk.StringVar(value=DEFAULT_DIFF_CMAP)
-        self.dod_vmin = tk.StringVar()
-        self.dod_vmax = tk.StringVar()
-
         self.grid_coord_mode = tk.StringVar(value="centers")
         self.grid_overlay = tk.BooleanVar(value=False)
 
@@ -288,8 +276,7 @@ class MdsViewApp(ctk.CTk):
         self._iter_map: dict[str, list[int]] = {}
         self._iter_sets: dict[str, set[int]] = {}
         self._shape_cache: dict[tuple[str, str], tuple[int, ...]] = {}
-        self._diff_iter_map: dict[tuple[str, str], list[int]] = {}
-        self._diff_iter_sets: dict[tuple[str, str], set[int]] = {}
+        self._scan_generation = 0
         self._playing = False
         self._playback_job: str | None = None
         self._auto_plot_job: str | None = None
@@ -308,7 +295,7 @@ class MdsViewApp(ctk.CTk):
         self._build_ui()
         self._bind_shortcuts()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.refresh_directory()
+        self.after(50, self.refresh_directory)
 
     # ------------------------------------------------------------------ UI
     def _build_ui(self) -> None:
@@ -368,7 +355,7 @@ class MdsViewApp(ctk.CTk):
         rail = ctk.CTkFrame(
             parent,
             fg_color=C["nav"],
-            width=68,
+            width=88,
             corner_radius=G.CTK["corner_radius"],
             border_color=C["border"],
             border_width=G.CTK["border_width"],
@@ -376,8 +363,8 @@ class MdsViewApp(ctk.CTk):
         rail.grid(row=0, column=0, sticky="ns", padx=(0, 10))
         rail.grid_propagate(False)
 
-        for key, symbol, _tip in self._NAV:
-            btn = G.nav_button(rail, symbol, lambda k=key: self._select_nav(k))
+        for key, label in self._NAV:
+            btn = G.nav_button(rail, label, lambda k=key: self._select_nav(k))
             btn.pack(pady=4, padx=6)
             self._nav_buttons[key] = btn
 
@@ -398,7 +385,7 @@ class MdsViewApp(ctk.CTk):
         )
         self._control_title.pack(fill=tk.X, padx=16, pady=(14, 8))
 
-        for key, _s, title in self._NAV:
+        for key, title in self._NAV:
             if key == "browse":
                 panel: ctk.CTkFrame | ctk.CTkScrollableFrame = ctk.CTkScrollableFrame(
                     shell,
@@ -414,8 +401,6 @@ class MdsViewApp(ctk.CTk):
         self._build_browse_panel()
         self._build_plot_panel()
         self._build_grid_panel()
-        self._build_diff_panel()
-        self._build_dod_panel()
         self._select_nav("browse")
 
     def _build_viewer(self, parent) -> None:
@@ -462,8 +447,14 @@ class MdsViewApp(ctk.CTk):
         plot_host.grid_columnconfigure(0, weight=1)
         plot_host.grid_rowconfigure(0, weight=1)
 
-        self.fig, self.ax = plt.subplots(figsize=(6.8, 4.2), facecolor=C["figure_bg"])
+        self.fig = plt.figure(figsize=(6.8, 4.2), facecolor=C["figure_bg"])
         self.fig.set_dpi(100)
+        with contextlib.suppress(Exception):
+            self.fig.set_layout_engine("none")
+        gs = self.fig.add_gridspec(1, 2, width_ratios=[24, 1], wspace=0.06)
+        self.ax = self.fig.add_subplot(gs[0, 0])
+        self.cax = self.fig.add_subplot(gs[0, 1])
+        self._colorbar = None
         self.canvas = FigureCanvasTkAgg(self.fig, master=plot_host)
         w = self.canvas.get_tk_widget()
         w.configure(bg=C["axes_bg"], highlightthickness=0)
@@ -483,11 +474,11 @@ class MdsViewApp(ctk.CTk):
 
         transport = ctk.CTkFrame(footer, fg_color="transparent")
         transport.pack(side=tk.LEFT, padx=(20, 0))
-        for text, cmd in (("⏮", lambda: self.jump_playback_frame(0)), ("◀", lambda: self.step_playback_frame(-1))):
+        for text, cmd in (("|<<", lambda: self.jump_playback_frame(0)), ("|<", lambda: self.step_playback_frame(-1))):
             G.ghost_button(transport, text, cmd, width=36).pack(side=tk.LEFT, padx=2)
         self._play_btn = G.accent_button(transport, "Play", self.toggle_playback, width=72)
         self._play_btn.pack(side=tk.LEFT, padx=6)
-        for text, cmd in (("▶", lambda: self.step_playback_frame(1)), ("⏭", lambda: self.jump_playback_frame(-1))):
+        for text, cmd in ((">|", lambda: self.step_playback_frame(1)), (">>|", lambda: self.jump_playback_frame(-1))):
             G.ghost_button(transport, text, cmd, width=36).pack(side=tk.LEFT, padx=2)
         G.ghost_button(transport, "Stop", self.stop_playback, width=56).pack(side=tk.LEFT, padx=(6, 12))
         ctk.CTkCheckBox(
@@ -509,7 +500,7 @@ class MdsViewApp(ctk.CTk):
 
     def _select_nav(self, key: str) -> None:
         self._active_nav = key
-        titles = {k: t for k, _s, t in self._NAV}
+        titles = {k: t for k, t in self._NAV}
         self._control_title.configure(text=titles[key])
         for name, panel in self._panels.items():
             if name == key:
@@ -526,6 +517,8 @@ class MdsViewApp(ctk.CTk):
                 )
             else:
                 btn.configure(fg_color="transparent", text_color=C["muted"], border_width=0)
+        if key == "grid" and self._catalog:
+            self._refresh_grid_info()
 
     def _build_browse_panel(self) -> None:
         p = self._panels["browse"]
@@ -634,32 +627,6 @@ class MdsViewApp(ctk.CTk):
         G.accent_button(p, "Preview grid", self.plot_grid_preview).pack(fill=tk.X, pady=(0, 6))
         G.ghost_button(p, "Apply to current field", self._apply_grid_to_field).pack(fill=tk.X)
 
-    def _build_diff_panel(self) -> None:
-        p = self._panels["diff"]
-        self._diff_card = p
-        self._dir_picker_row(p, "Later run", self.diff_later_dir, self._on_diff_dirs_change)
-        self._dir_picker_row(p, "Earlier run", self.diff_earlier_dir, self._on_diff_dirs_change)
-        self._field_row(p, "Variable", self.diff_var, self._on_diff_var_change, "diff_var_combo")
-        self._slider_row(p, "Later", self.diff_later, "diff_later_slider", on_change=None, max_slider_steps=None)
-        self._slider_row(p, "Earlier", self.diff_earlier, "diff_earlier_slider", on_change=None, max_slider_steps=None)
-        self._slider_row(p, "Level", self.diff_level, "diff_level_slider", on_change=None)
-        self._cmap_limits_row(p, self.diff_cmap, self.diff_vmin, self.diff_vmax, "diff_cmap_combo")
-        G.accent_button(p, "Plot difference", self.plot_diff).pack(fill=tk.X, pady=(14, 6))
-        G.ghost_button(p, "Save MDS", self.save_diff_field).pack(fill=tk.X)
-
-    def _build_dod_panel(self) -> None:
-        p = self._panels["dod"]
-        self._dod_card = p
-        self._field_row(p, "Variable A", self.dod_a, self._fill_time_combos, "dod_a_combo")
-        self._field_row(p, "Variable B", self.dod_b, self._fill_time_combos, "dod_b_combo")
-        self._slider_row(p, "Time t1", self.dod_t1, "dod_t1_slider", on_change=None, max_slider_steps=None)
-        self._slider_row(p, "Time t2", self.dod_t2, "dod_t2_slider", on_change=None, max_slider_steps=None)
-        self._slider_row(p, "Level", self.dod_level, "dod_level_slider", on_change=None)
-        self._cmap_limits_row(p, self.dod_cmap, self.dod_vmin, self.dod_vmax, "dod_cmap_combo")
-        G.accent_button(p, "Plot DiD", self.plot_dod).pack(fill=tk.X, pady=(14, 6))
-        G.ghost_button(p, "Volume stats", self.show_dod_stats).pack(fill=tk.X, pady=(0, 6))
-        G.ghost_button(p, "Save MDS", self.save_dod_field).pack(fill=tk.X)
-
     def _field_row(self, parent, label: str, var: tk.StringVar, command, attr: str) -> None:
         G.section_label(parent, label).pack(anchor="w", pady=(10, 4))
         menu = G.option_menu(parent, var, [], command=lambda _v: command() if command else None)
@@ -692,42 +659,6 @@ class MdsViewApp(ctk.CTk):
         )
         setattr(parent, attr, slider)
         return slider
-
-    def _dir_picker_row(
-        self, parent, label: str, var: tk.StringVar, on_change=None
-    ) -> None:
-        G.section_label(parent, label).pack(anchor="w", pady=(10, 4))
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill=tk.X)
-        row.grid_columnconfigure(0, weight=1)
-        entry = ctk.CTkEntry(
-            row,
-            textvariable=var,
-            font=G.FONTS["label"],
-            fg_color=C["card"],
-            border_color=C["border_strong"],
-            border_width=G.CTK["border_width"],
-            text_color=C["text"],
-            corner_radius=8,
-            height=G.CTK["entry_height"],
-        )
-        entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-
-        def browse() -> None:
-            path = filedialog.askdirectory(initialdir=var.get() or self.data_dir.get())
-            if path:
-                var.set(os.path.abspath(path))
-                if on_change:
-                    on_change()
-
-        G.ghost_button(row, "…", browse, width=36).grid(row=0, column=1)
-
-        def on_commit(_event=None) -> None:
-            if on_change:
-                on_change()
-
-        entry.bind("<FocusOut>", on_commit)
-        entry.bind("<Return>", on_commit)
 
     def _cmap_limits_row(
         self,
@@ -793,7 +724,7 @@ class MdsViewApp(ctk.CTk):
             pass
 
     def _show_welcome(self) -> None:
-        self._clear_figure()
+        self._clear_figure(show_colorbar=False)
         self.fig.patch.set_facecolor(C["figure_bg"])
         self.ax.set_facecolor(C["figure_bg"])
         self.ax.text(
@@ -876,57 +807,19 @@ class MdsViewApp(ctk.CTk):
         except OSError:
             pass
 
-    def _update_diff_level_slider(self, prefix: str | None = None) -> None:
-        prefix = prefix or self.diff_var.get()
-        if not prefix:
-            return
-        try:
-            self._configure_level_slider(
-                self._diff_card, self.diff_level, "diff_level_slider",
-                self._shape_for(self.diff_later_dir.get(), prefix),
-            )
-        except OSError:
-            pass
-
-    def _update_dod_level_slider(self, prefix: str | None = None) -> None:
-        prefix = prefix or self.dod_a.get() or self.plot_var.get()
-        if not prefix:
-            return
-        try:
-            self._configure_level_slider(
-                self._dod_card, self.dod_level, "dod_level_slider",
-                self._shape_for(self.data_dir.get(), prefix),
-            )
-        except OSError:
-            pass
-
     def _combo_set_values(self, menu: ctk.CTkOptionMenu, values: list[str]) -> None:
         menu.configure(values=values or [""])
         if values:
             menu.set(values[-1])
 
-    def _sync_combos(self) -> None:
+    def _sync_plot_combos(self) -> None:
         names = self._prefixes
-        for menu in (
-            self._plot_card.plot_var_combo,
-            self._dod_card.dod_a_combo,
-            self._dod_card.dod_b_combo,
-        ):
-            self._combo_set_values(menu, names)
+        self._combo_set_values(self._plot_card.plot_var_combo, names)
         if names:
-            self.plot_var.set("T" if "T" in names else names[0])
-            self.dod_a.set("T" if "T" in names else names[0])
-            self.dod_b.set("S" if "S" in names else (names[1] if len(names) > 1 else names[0]))
+            current = self.plot_var.get()
+            if current not in names:
+                self.plot_var.set("T" if "T" in names else names[0])
         self._on_plot_var_change()
-        self._sync_diff_combos()
-        self._fill_time_combos()
-
-    def _fill_time_combos(self) -> None:
-        prefix = self.dod_a.get() or self.plot_var.get()
-        iters = self._iters_for(prefix)
-        self._dod_card.dod_t1_slider.configure(iters, pick="first")
-        self._dod_card.dod_t2_slider.configure(iters, pick="last")
-        self._update_dod_level_slider(prefix)
 
     def _shape_for(self, data_dir: str, prefix: str) -> tuple[int, ...]:
         key = (os.path.abspath(data_dir), prefix)
@@ -956,46 +849,6 @@ class MdsViewApp(ctk.CTk):
             self._iter_sets[prefix] = set(iters)
         return self._iter_map[prefix]
 
-    def _iters_for_dir(self, data_dir: str, prefix: str) -> list[int]:
-        if not prefix or not data_dir:
-            return []
-        key = (os.path.abspath(data_dir), prefix)
-        if key not in self._diff_iter_map:
-            if self._catalog and key[0] == self._catalog.data_dir:
-                iters = self._catalog.iters_for(prefix)
-            else:
-                iters = io.list_iterations(data_dir, prefix)
-            self._diff_iter_map[key] = iters
-            self._diff_iter_sets[key] = set(iters)
-        return self._diff_iter_map[key]
-
-    def _diff_prefixes(self) -> list[str]:
-        later_dir = self.diff_later_dir.get()
-        earlier_dir = self.diff_earlier_dir.get()
-        try:
-            later = set(io.list_prefixes(later_dir))
-            earlier = set(io.list_prefixes(earlier_dir))
-        except OSError:
-            return []
-        if later_dir == earlier_dir:
-            return sorted(later)
-        common = sorted(later & earlier)
-        return common if common else sorted(later)
-
-    def _sync_diff_combos(self) -> None:
-        names = self._diff_prefixes()
-        self._combo_set_values(self._diff_card.diff_var_combo, names)
-        if names:
-            current = self.diff_var.get()
-            if current not in names:
-                self.diff_var.set(names[0])
-        self._on_diff_var_change()
-
-    def _on_diff_dirs_change(self) -> None:
-        self._diff_iter_map.clear()
-        self._diff_iter_sets.clear()
-        self._sync_diff_combos()
-
     # ---------------------------------------------------------------- data
     def browse_directory(self) -> None:
         path = filedialog.askdirectory(initialdir=self.data_dir.get())
@@ -1006,50 +859,66 @@ class MdsViewApp(ctk.CTk):
     def refresh_directory(self) -> None:
         data_dir = os.path.abspath(self.data_dir.get())
         self.data_dir.set(data_dir)
-        self.diff_later_dir.set(data_dir)
-        self.diff_earlier_dir.set(data_dir)
         self._iter_map.clear()
         self._iter_sets.clear()
-        self._diff_iter_map.clear()
-        self._diff_iter_sets.clear()
         self._shape_cache.clear()
         self._playback_clim_key = None
-        try:
-            catalog.invalidate_catalog(data_dir)
-            self._catalog = catalog.get_catalog(data_dir)
-            self._prefixes = self._catalog.prefixes
-        except OSError as exc:
-            messagebox.showerror("Error", str(exc))
-            return
+        self._scan_generation += 1
+        generation = self._scan_generation
 
         self.var_list.delete(0, tk.END)
-        for prefix in self._prefixes:
+        self._prefixes = []
+        self._catalog = None
+        self._set_detail("Scanning directory…")
+        self.run_summary.set("")
+        self.status.set(f"Scanning {os.path.basename(data_dir)}…")
+
+        def work() -> None:
             try:
-                summary = self._catalog.meta_summary(prefix)
-                n_iters = self._catalog.iter_count(prefix)
-                line = (
-                    f"{prefix:8s}  {str(summary.shape):18s}  "
-                    f"{summary.nbytes_human:>8s}  {n_iters} snaps"
-                )
-            except OSError:
-                line = prefix
-            self.var_list.insert(tk.END, line)
+                catalog.invalidate_catalog(data_dir)
+                cat = catalog.get_catalog(data_dir)
+                self._call_ui(lambda: self._apply_catalog(data_dir, cat, generation))
+            except OSError as exc:
+                self._call_ui(lambda: self._on_scan_failed(exc, generation))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_scan_failed(self, exc: OSError, generation: int) -> None:
+        if generation != self._scan_generation or self._closing:
+            return
+        messagebox.showerror("Error", str(exc))
+        self._set_detail(str(exc))
+        self._log("Scan failed")
+
+    def _apply_catalog(self, data_dir: str, cat: catalog.RunCatalog, generation: int) -> None:
+        if generation != self._scan_generation or self._closing:
+            return
+
+        self._catalog = cat
+        self._prefixes = cat.prefixes
+        self.var_list.delete(0, tk.END)
+        for prefix in self._prefixes:
+            n_iters = cat.iter_count(prefix)
+            self.var_list.insert(tk.END, f"{prefix:10s}  {n_iters:5d} snapshots")
 
         if self._prefixes:
             self.var_list.selection_set(0)
-            self._on_var_select()
-            self._sync_combos()
-            n = len(self._iters_for(self._prefixes[0]))
-            self.run_summary.set(f"{len(self._prefixes)} fields · {n} snapshots · {os.path.basename(data_dir)}")
-            self._log(f"Loaded {len(self._prefixes)} fields")
-            self._select_nav("plot")
-            self.after(200, self._auto_plot_if_ready)
+            self._set_detail(
+                f"{len(self._prefixes)} variables indexed.\n"
+                "Select one for shape and metadata."
+            )
+            self._sync_plot_combos()
+            first_iters = cat.iter_count(self._prefixes[0])
+            self.run_summary.set(
+                f"{len(self._prefixes)} fields · up to {first_iters} snapshots · "
+                f"{os.path.basename(data_dir)}"
+            )
+            self._log(f"Indexed {len(self._prefixes)} fields")
         else:
             self._set_detail("No .meta files found.")
             self.run_summary.set("")
             self._show_welcome()
             self._log("No MDS output in folder")
-        self._refresh_grid_info()
 
     def _grid_plot_kwargs(self) -> dict:
         return {
@@ -1089,10 +958,12 @@ class MdsViewApp(ctk.CTk):
         data_dir = self.data_dir.get()
         mode = self.grid_coord_mode.get()
         try:
-            self._clear_figure()
+            self._clear_figure(show_colorbar=False)
             self.fig.patch.set_facecolor(C["figure_bg"])
             self.ax.set_facecolor(C["figure_bg"])
             grid.plot_grid_preview(data_dir, mode=mode, ax=self.ax, show=False)
+            with contextlib.suppress(Exception):
+                self.fig.set_layout_engine("none")
             self.canvas.draw()
             self._reset_stats()
             self._set_view(
@@ -1131,21 +1002,6 @@ class MdsViewApp(ctk.CTk):
         self._plot_card.plot_iter_slider.configure(iters, pick="first")
         self._update_plot_level_slider(prefix)
         self._schedule_auto_plot()
-
-    def _on_diff_var_change(self) -> None:
-        prefix = self.diff_var.get()
-        later_dir = self.diff_later_dir.get()
-        earlier_dir = self.diff_earlier_dir.get()
-        later_iters = self._iters_for_dir(later_dir, prefix)
-        earlier_iters = self._iters_for_dir(earlier_dir, prefix)
-        self._diff_card.diff_later_slider.configure(later_iters, pick="last")
-        self._diff_card.diff_earlier_slider.configure(earlier_iters, pick="first")
-        self._update_diff_level_slider(prefix)
-
-    @staticmethod
-    def _short_dir(path: str) -> str:
-        path = os.path.abspath(path)
-        return os.path.basename(path) or path
 
     def _current_level(self, var: tk.StringVar) -> int | None:
         return self._parse_int(var.get())
@@ -1269,7 +1125,7 @@ class MdsViewApp(ctk.CTk):
         vmax_in = self._playback_vmax if use_locked else self._parse_float(self.plot_vmax.get())
         self._clear_figure()
         shape = self._shape_for(self.data_dir.get(), prefix)
-        plotting.draw_slice_on_ax(
+        mesh = plotting.draw_slice_on_ax(
             self.ax, field2d, self.data_dir.get(),
             title=plotting.format_field_title(
                 prefix, iteration, level=level, shape=shape,
@@ -1277,9 +1133,15 @@ class MdsViewApp(ctk.CTk):
             cmap=self.plot_cmap.get(),
             vmin=vmin_in,
             vmax=vmax_in,
-            clear=False, colorbar_label=prefix,
+            clear=False,
+            tight_layout=False,
             **self._grid_plot_kwargs(),
         )
+        if self._colorbar is None:
+            self._colorbar = self.fig.colorbar(mesh, cax=self.cax, label=prefix)
+        else:
+            self._colorbar.update_normal(mesh)
+            self._colorbar.set_label(prefix)
         self._update_field_stats(field2d)
         iter_slider = self._plot_card.plot_iter_slider
         if self._playing:
@@ -1292,7 +1154,7 @@ class MdsViewApp(ctk.CTk):
                 self.plot_cmap.get(), field2d, vmin_in, vmax_in,
             ),
         )
-        self.canvas.draw()
+        self.canvas.draw_idle()
 
     def toggle_playback(self) -> None:
         if self._playing:
@@ -1594,9 +1456,9 @@ class MdsViewApp(ctk.CTk):
             self.destroy()
 
     # ---------------------------------------------------------------- actions
-    def _clear_figure(self) -> None:
-        self.fig.clf()
-        self.ax = self.fig.add_subplot(111)
+    def _clear_figure(self, *, show_colorbar: bool = True) -> None:
+        self.ax.clear()
+        self.cax.set_visible(show_colorbar)
 
     def plot_snapshot(self) -> None:
         if self._closing:
@@ -1613,137 +1475,6 @@ class MdsViewApp(ctk.CTk):
         except Exception as exc:
             messagebox.showerror("Plot failed", str(exc))
 
-    def plot_diff(self) -> None:
-        prefix = self.diff_var.get()
-        later_dir = self.diff_later_dir.get()
-        earlier_dir = self.diff_earlier_dir.get()
-        later, earlier = self._parse_int(self.diff_later.get()), self._parse_int(self.diff_earlier.get())
-        level = self._safe_level(prefix, self.diff_level, later_dir)
-        if None in (later, earlier) or level is None:
-            return
-        try:
-            diff, _ = ops.diff_slice(
-                later_dir, prefix, later, earlier, level=level, data_dir_b=earlier_dir
-            )
-            diff2d = np.squeeze(diff)
-            vmin_in = self._parse_float(self.diff_vmin.get())
-            vmax_in = self._parse_float(self.diff_vmax.get())
-            self._clear_figure()
-            same_dir = os.path.abspath(later_dir) == os.path.abspath(earlier_dir)
-            shape = self._shape_for(later_dir, prefix)
-            title = plotting.format_diff_title(
-                prefix,
-                later,
-                earlier,
-                level=level,
-                shape=shape,
-                later_tag="" if same_dir else f"@{self._short_dir(later_dir)}",
-                earlier_tag="" if same_dir else f"@{self._short_dir(earlier_dir)}",
-            )
-            plotting.plot_array(
-                diff, later_dir,
-                title=title,
-                level=None, cmap=self.diff_cmap.get(),
-                vmin=vmin_in, vmax=vmax_in,
-                symmetric=True, ax=self.ax, show=False,
-                **self._grid_plot_kwargs(),
-            )
-            self.canvas.draw()
-            self._update_field_stats(diff2d)
-            self._set_view(
-                title,
-                plotting.format_cmap_limits_meta(
-                    self.diff_cmap.get(), diff2d, vmin_in, vmax_in, symmetric=True,
-                ),
-            )
-            self._log(f"Diff {prefix}")
-        except Exception as exc:
-            messagebox.showerror("Diff failed", str(exc))
-
-    def save_diff_field(self) -> None:
-        prefix = self.diff_var.get()
-        later_dir = self.diff_later_dir.get()
-        earlier_dir = self.diff_earlier_dir.get()
-        later, earlier = self._parse_int(self.diff_later.get()), self._parse_int(self.diff_earlier.get())
-        if None in (later, earlier):
-            return
-        path = filedialog.asksaveasfilename(initialfile=f"Diff_{prefix}_{later}_{earlier}")
-        if not path:
-            return
-        try:
-            diff, _ = ops.diff_fields(
-                later_dir, prefix, later, earlier, data_dir_b=earlier_dir
-            )
-            io.write_field(path, diff, iteration=later)
-            self._log(f"Saved diff → {path}")
-        except Exception as exc:
-            messagebox.showerror("Save failed", str(exc))
-
-    def plot_dod(self) -> None:
-        var_a, var_b = self.dod_a.get(), self.dod_b.get()
-        t1, t2 = self._parse_int(self.dod_t1.get()), self._parse_int(self.dod_t2.get())
-        level = self._safe_level(var_a, self.dod_level)
-        if not var_a or not var_b or None in (t1, t2) or level is None:
-            return
-        try:
-            result, meta = ops.difference_of_differences(
-                self.data_dir.get(), var_a, var_b, t1, t2, levels=[level], progress=False,
-            )
-            result2d = np.squeeze(np.asarray(result))
-            vmin_in = self._parse_float(self.dod_vmin.get())
-            vmax_in = self._parse_float(self.dod_vmax.get())
-            self._clear_figure()
-            shape = self._shape_for(self.data_dir.get(), var_a)
-            title = plotting.format_dod_title(var_a, var_b, t1, t2, level=level, shape=shape)
-            plotting.plot_array(
-                result, self.data_dir.get(), title=title, level=0, cmap=self.dod_cmap.get(),
-                vmin=vmin_in, vmax=vmax_in,
-                symmetric=True, ax=self.ax, show=False,
-                **self._grid_plot_kwargs(),
-            )
-            self.canvas.draw()
-            summary = ops.stats(np.asarray(result))
-            self._update_field_stats(result2d)
-            self._set_view(
-                title,
-                (
-                    f"mean {summary['mean']:.4g}"
-                    f"  ·  {plotting.format_cmap_limits_meta(self.dod_cmap.get(), result2d, vmin_in, vmax_in, symmetric=True)}"
-                ),
-            )
-            self._close_mmap(result, meta)
-        except Exception as exc:
-            messagebox.showerror("DiD failed", str(exc))
-
-    def show_dod_stats(self) -> None:
-        t1, t2 = self._parse_int(self.dod_t1.get()), self._parse_int(self.dod_t2.get())
-        if None in (t1, t2):
-            return
-        try:
-            summary = ops.streaming_stats(self.data_dir.get(), self.dod_a.get(), self.dod_b.get(), t1, t2)
-            text = "\n".join(f"{k:>8s}  {v:.6g}" for k, v in summary.items())
-            messagebox.showinfo("DiD statistics", text)
-        except Exception as exc:
-            messagebox.showerror("Stats failed", str(exc))
-
-    def save_dod_field(self) -> None:
-        var_a, var_b = self.dod_a.get(), self.dod_b.get()
-        t1, t2 = self._parse_int(self.dod_t1.get()), self._parse_int(self.dod_t2.get())
-        if None in (t1, t2):
-            return
-        path = filedialog.asksaveasfilename(initialfile=f"DiD_{var_a}_{var_b}_{t1}_{t2}")
-        if not path:
-            return
-        try:
-            result, meta = ops.difference_of_differences(
-                self.data_dir.get(), var_a, var_b, t1, t2, progress=True,
-            )
-            io.write_field(path, result, iteration=t1)
-            self._log(f"Saved DiD → {path}")
-            self._close_mmap(result, meta)
-        except Exception as exc:
-            messagebox.showerror("Save failed", str(exc))
-
     def save_png(self) -> None:
         path = filedialog.asksaveasfilename(defaultextension=".png", filetypes=[("PNG", "*.png")])
         if path:
@@ -1759,14 +1490,6 @@ class MdsViewApp(ctk.CTk):
     def _parse_int(text: str) -> int | None:
         text = text.strip()
         return int(text) if text else None
-
-    @staticmethod
-    def _close_mmap(result, meta) -> None:
-        if hasattr(result, "base") and hasattr(result.base, "close"):
-            result.base.close()
-        mmap_path = meta.get("mmap_path")
-        if mmap_path and os.path.exists(mmap_path):
-            os.unlink(mmap_path)
 
 
 def launch_gui(initial_dir: str = ".") -> None:

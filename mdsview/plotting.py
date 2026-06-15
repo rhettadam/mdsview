@@ -60,22 +60,6 @@ def format_diff_title(
     return ", ".join(parts)
 
 
-def format_dod_title(
-    var_a: str,
-    var_b: str,
-    time1: int,
-    time2: int,
-    *,
-    level: int | None = None,
-    shape: tuple[int, ...] | None = None,
-) -> str:
-    parts = [f"({var_b} - {var_a})", f"t1={time1}", f"t2={time2}"]
-    lev = effective_level(shape, level) if shape is not None else level
-    if lev is not None:
-        parts.append(f"level {lev}")
-    return ", ".join(parts)
-
-
 def _resolve_clim(
     field2d: np.ndarray,
     vmin: float | None,
@@ -142,9 +126,14 @@ def draw_slice_on_ax(
     overlay_grid: bool = False,
     clear: bool = True,
     colorbar_label: str = "",
+    tight_layout: bool = True,
+    cax: Any | None = None,
 ) -> Any:
     """Draw a 2-D field slice on an existing axes (for GUI playback/GIF)."""
     if clear:
+        for extra in list(ax.figure.axes):
+            if extra is not ax:
+                extra.remove()
         ax.clear()
 
     from .grid import draw_field_mesh, overlay_cell_outlines, plot_coords_for_field
@@ -168,10 +157,14 @@ def draw_slice_on_ax(
             color="0.4", verticalalignment="top",
         )
     if colorbar_label:
-        ax.figure.colorbar(mesh, ax=ax, label=colorbar_label)
+        if cax is not None:
+            ax.figure.colorbar(mesh, cax=cax, label=colorbar_label)
+        else:
+            ax.figure.colorbar(mesh, ax=ax, label=colorbar_label)
     ax.set_xlabel(coords.xlabel)
     ax.set_ylabel(coords.ylabel)
-    ax.figure.tight_layout()
+    if tight_layout:
+        ax.figure.tight_layout()
     return mesh
 
 
@@ -259,7 +252,7 @@ def plot_array(
     save: str | None = None,
     show: bool = True,
 ) -> tuple[Any, Any]:
-    """Plot a precomputed array (e.g. DiD result) as a 2D slice."""
+    """Plot a precomputed array as a 2D slice."""
     field2d = pick_2d_slice(arr, level)
 
     created_fig = ax is None
@@ -300,6 +293,9 @@ def plot_diff(
     iteration_b: int,
     *,
     level: int | None = None,
+    data_dir_b: str | None = None,
+    later_tag: str = "",
+    earlier_tag: str = "",
     cmap: str = DEFAULT_DIFF_CMAP,
     vmin: float | None = None,
     vmax: float | None = None,
@@ -313,7 +309,9 @@ def plot_diff(
     from .ops import diff_slice
 
     if diff2d is None:
-        diff2d, _ = diff_slice(data_dir, prefix, iteration_a, iteration_b, level)
+        diff2d, _ = diff_slice(
+            data_dir, prefix, iteration_a, iteration_b, level, data_dir_b=data_dir_b
+        )
 
     created_fig = ax is None
     if ax is None:
@@ -322,7 +320,15 @@ def plot_diff(
         fig = ax.figure
 
     shape = io.field_info(data_dir, prefix).shape
-    title = format_diff_title(prefix, iteration_a, iteration_b, level=level, shape=shape)
+    title = format_diff_title(
+        prefix,
+        iteration_a,
+        iteration_b,
+        level=level,
+        shape=shape,
+        later_tag=later_tag,
+        earlier_tag=earlier_tag,
+    )
 
     draw_slice_on_ax(
         ax,

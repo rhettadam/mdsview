@@ -14,9 +14,14 @@ from .cli_help import (
     EXAMPLES,
     HelpFormatter,
     add_data_dir,
+    add_iterations_arg,
     add_json_flag,
+    add_levels_arg,
     add_plot_options,
+    add_rec_arg,
+    add_region_arg,
     add_variable,
+    add_variables_arg,
 )
 from .colormaps import DEFAULT_DIFF_CMAP
 from .errors import MdsViewError
@@ -42,9 +47,24 @@ def _should_show(args: argparse.Namespace) -> bool:
     return True
 
 
-def _close_memmap(arr) -> None:
-    if hasattr(arr, "base") and hasattr(arr.base, "close"):
-        arr.base.close()
+def _timeseries_should_show(args: argparse.Namespace) -> bool:
+    if getattr(args, "no_show", False) or getattr(args, "save_figure", None):
+        return False
+    if os.name != "nt" and not os.environ.get("DISPLAY"):
+        return False
+    return True
+
+
+def _diff_dir_tags(later_dir: str, earlier_dir: str) -> tuple[str, str]:
+    """Return @folder suffixes for plot labels when the two runs differ."""
+    if os.path.abspath(later_dir) == os.path.abspath(earlier_dir):
+        return "", ""
+
+    def tag(path: str) -> str:
+        name = os.path.basename(os.path.abspath(path)) or os.path.abspath(path)
+        return f"@{name}"
+
+    return tag(later_dir), tag(earlier_dir)
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -122,38 +142,57 @@ def cmd_plot(args: argparse.Namespace) -> int:
 
 def cmd_diff(args: argparse.Namespace) -> int:
     data_dir = abs_data_dir(args.dir)
+    data_dir_b = abs_data_dir(args.dir_b) if args.dir_b else None
     require_prefix(data_dir, args.prefix)
+    if data_dir_b:
+        require_prefix(data_dir_b, args.prefix)
+
     later = args.later if args.later is not None else args.iter_a
     earlier = args.earlier if args.earlier is not None else args.iter_b
     if later is None or earlier is None:
         raise MdsViewError("Provide both --later and --earlier (or two positional iteration numbers).", exit_code=2)
 
     require_iteration(data_dir, args.prefix, later)
-    require_iteration(data_dir, args.prefix, earlier)
+    earlier_dir = data_dir_b or data_dir
+    require_iteration(earlier_dir, args.prefix, earlier)
 
     shape = io.field_info(data_dir, args.prefix).shape
+    if data_dir_b:
+        shape_b = io.field_info(data_dir_b, args.prefix).shape
+        if shape != shape_b:
+            raise MdsViewError(
+                f"Shape mismatch for {args.prefix}: {shape} in later run vs {shape_b} in earlier run"
+            )
     _, nz = ops.level_axis(shape)
     want_full_volume = args.save_field and args.level is None and nz > 1
 
     if want_full_volume:
-        diff, meta = ops.diff_fields(data_dir, args.prefix, later, earlier)
+        diff, meta = ops.diff_fields(
+            data_dir, args.prefix, later, earlier, data_dir_b=data_dir_b
+        )
     else:
-        diff, meta = ops.diff_slice(data_dir, args.prefix, later, earlier, level=args.level)
+        diff, meta = ops.diff_slice(
+            data_dir, args.prefix, later, earlier, level=args.level, data_dir_b=data_dir_b
+        )
+
+    later_tag, earlier_tag = _diff_dir_tags(data_dir, earlier_dir)
+    formula = f"{args.prefix}({later}{later_tag}) - {args.prefix}({earlier}{earlier_tag})"
 
     summary = ops.stats(np.asarray(diff))
+    safe_meta = {k: v for k, v in meta.items() if k != "source_meta"}
     if args.json:
         print(
             json.dumps(
                 {
-                    "formula": f"{args.prefix}({later}) - {args.prefix}({earlier})",
-                    "meta": meta,
+                    "formula": formula,
+                    "meta": safe_meta,
                     "stats": summary,
                 },
                 indent=2,
             )
         )
     else:
-        print(f"{args.prefix}({later}) - {args.prefix}({earlier})")
+        print(formula)
         for key, value in summary.items():
             print(f"  {key}: {value:.6g}")
 
@@ -174,6 +213,9 @@ def cmd_diff(args: argparse.Namespace) -> int:
             later,
             earlier,
             level=args.level,
+            data_dir_b=data_dir_b,
+            later_tag=later_tag,
+            earlier_tag=earlier_tag,
             cmap=args.cmap,
             vmin=args.vmin,
             vmax=args.vmax,
@@ -205,6 +247,106 @@ def cmd_combine(args: argparse.Namespace) -> int:
             out_base = out_base[:-5]
         io.write_field(out_base, stacked, iteration=used_iters[0] if used_iters else None)
         print(f"Wrote {out_base}.data / {out_base}.meta")
+    return 0
+
+
+def cmd_extract(args: argparse.Namespace) -> int:
+    from .extract import extract_field
+
+    data_dir = abs_data_dir(args.dir)
+    require_prefix(data_dir, args.prefix)
+    result = extract_field(
+        data_dir,
+        args.prefix,
+        args.output,
+        iterations=args.iterations,
+        levels=args.levels,
+        region=args.region,
+        rec=args.rec,
+    )
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print(
+            f"Wrote {result['snapshots_written']} snapshots of {args.prefix} "
+            f"to {result['output_dir']}"
+        )
+    return 0
+
+
+def cmd_timeseries(args: argparse.Namespace) -> int:
+    from .timeseries import (
+        compute_timeseries,
+        plot_timeseries,
+        write_timeseries_csv,
+        write_timeseries_json,
+    )
+
+    data_dir = abs_data_dir(args.dir)
+    require_prefix(data_dir, args.prefix)
+    payload = compute_timeseries(
+        data_dir,
+        args.prefix,
+        iterations=args.iterations,
+        level=args.level,
+        at=args.at,
+        box=args.box,
+        rec=args.rec,
+    )
+
+    if args.output:
+        if args.output.lower().endswith(".json"):
+            write_timeseries_json(args.output, payload)
+        else:
+            write_timeseries_csv(args.output, payload)
+
+    if not args.no_plot:
+        plot_timeseries(
+            payload,
+            save=args.save_figure,
+            show=_timeseries_should_show(args),
+        )
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+    elif args.output:
+        print(f"Wrote {os.path.abspath(args.output)} ({len(payload['series'])} points)")
+    elif args.no_plot:
+        print(json.dumps(payload, indent=2))
+    return 0
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    from .export_nc import export_to_netcdf
+    from .selection import parse_prefix_list
+
+    data_dir = abs_data_dir(args.dir)
+    prefixes = parse_prefix_list(args.variables)
+    for prefix in prefixes:
+        require_prefix(data_dir, prefix)
+
+    try:
+        result = export_to_netcdf(
+            data_dir,
+            prefixes,
+            args.output,
+            iterations=args.iterations,
+            levels=args.levels,
+            region=args.region,
+            rec=args.rec,
+            compress=not args.no_compress,
+        )
+    except ImportError as exc:
+        raise MdsViewError(str(exc)) from exc
+
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        names = ", ".join(v["variable"] for v in result["variables"])
+        print(
+            f"Wrote {result['output']}  ({names}, "
+            f"{len(result['iterations'])} snapshots)"
+        )
     return 0
 
 
@@ -277,91 +419,6 @@ def cmd_generate_sample(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_dod(args: argparse.Namespace) -> int:
-    data_dir = abs_data_dir(args.dir)
-    require_prefix(data_dir, args.var_a)
-    require_prefix(data_dir, args.var_b)
-    require_iteration(data_dir, args.var_a, args.time1)
-    require_iteration(data_dir, args.var_b, args.time1)
-    require_iteration(data_dir, args.var_a, args.time2)
-    require_iteration(data_dir, args.var_b, args.time2)
-
-    var_a = args.var_a
-    var_b = args.var_b
-    time1 = args.time1
-    time2 = args.time2
-
-    formula = f"({var_b}@{time1} - {var_a}@{time1}) - ({var_b}@{time2} - {var_a}@{time2})"
-    print("Difference-of-differences:")
-    print(f"  {formula}")
-    print("  (how the gap between the two variables changed from time1 to time2)")
-
-    summary = ops.streaming_stats(data_dir, var_a, var_b, time1, time2, rec=args.rec)
-    if args.json:
-        print(json.dumps({"formula": formula, "stats": summary}, indent=2))
-    else:
-        print("Stats:")
-        for key, value in summary.items():
-            print(f"  {key}: {value:.6g}")
-
-    if not (args.save_field or args.plot or args.output):
-        return 0
-
-    levels = None
-    if (args.plot or args.output) and not args.save_field:
-        meta = io.read_field_meta(data_dir, var_a, time1)
-        _, nz = ops.level_axis(meta.shape)
-        default_level = nz // 2 if nz > 1 else 0
-        levels = [args.level if args.level is not None else default_level]
-
-    result, meta = ops.difference_of_differences(
-        data_dir,
-        var_a,
-        var_b,
-        time1,
-        time2,
-        rec=args.rec,
-        levels=levels,
-        progress=not args.quiet,
-    )
-
-    try:
-        if args.save_field:
-            out_base = args.save_field
-            if out_base.endswith(".data"):
-                out_base = out_base[:-5]
-            io.write_field(out_base, result, iteration=time1)
-            print(f"Wrote {out_base}.data / {out_base}.meta")
-
-        if args.plot or args.output:
-            shape = io.field_info(data_dir, var_a).shape
-            plot_level = args.level if args.level is not None else plotting.effective_level(shape, None)
-            title = plotting.format_dod_title(
-                var_a, var_b, time1, time2,
-                level=plot_level,
-                shape=shape,
-            )
-            plotting.plot_array(
-                result,
-                data_dir,
-                title=title,
-                level=args.level,
-                cmap=args.cmap,
-                vmin=args.vmin,
-                vmax=args.vmax,
-                symmetric=True,
-                save=args.output,
-                show=_should_show(args),
-            )
-    finally:
-        _close_memmap(result)
-        mmap_path = meta.get("mmap_path")
-        if mmap_path and os.path.exists(mmap_path) and not args.save_field:
-            os.unlink(mmap_path)
-
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="mdsview",
@@ -405,9 +462,21 @@ def build_parser() -> argparse.ArgumentParser:
         "diff",
         help="Subtract two snapshots of the same variable",
         formatter_class=HelpFormatter,
-        description="Computes field(LATER) - field(EARLIER). Default: one 2-D slice (memory-efficient).",
+        description=(
+            "Computes field(LATER) - field(EARLIER). "
+            "Use -d for the later run and --dir-b for a different earlier run. "
+            "Default: one 2-D slice (memory-efficient)."
+        ),
     )
     add_data_dir(p_diff)
+    p_diff.add_argument(
+        "--dir-b",
+        "--earlier-dir",
+        dest="dir_b",
+        default=None,
+        metavar="FOLDER",
+        help="Run directory for the earlier snapshot (default: same as -d)",
+    )
     add_variable(p_diff, required=True)
     req = p_diff.add_argument_group("Iterations (required)")
     req.add_argument("--later", type=int, metavar="N", help="Later iteration (minuend)")
@@ -437,26 +506,114 @@ def build_parser() -> argparse.ArgumentParser:
     add_json_flag(p_combine)
     p_combine.set_defaults(func=cmd_combine)
 
-    p_dod = sub.add_parser(
-        "dod",
-        help="Difference-of-differences between two variables",
+    p_export = sub.add_parser(
+        "export",
+        help="Export MDS fields to NetCDF",
         formatter_class=HelpFormatter,
-        description="Formula: (B@time1 - A@time1) - (B@time2 - A@time2). Level-by-level I/O for 3-D fields.",
+        description=(
+            "Write selected variables and snapshots to a .nc file with labelled "
+            "time/depth/y/x dimensions and XC/YC/RC coordinates when available."
+        ),
     )
-    add_data_dir(p_dod)
-    req_d = p_dod.add_argument_group("Variables and times (required)")
-    req_d.add_argument("-a", "--var-a", "--variable-a", dest="var_a", required=True, metavar="NAME")
-    req_d.add_argument("-b", "--var-b", "--variable-b", dest="var_b", required=True, metavar="NAME")
-    req_d.add_argument("--time1", "--t1", dest="time1", type=int, required=True, metavar="N")
-    req_d.add_argument("--time2", "--t2", dest="time2", type=int, required=True, metavar="N")
-    req_d.add_argument("--rec", type=int, default=None, metavar="K", help="Record index for multi-record files")
-    out_d = p_dod.add_argument_group("Output")
-    out_d.add_argument("--save-field", metavar="PREFIX", help="Write DiD result to .data/.meta")
-    out_d.add_argument("--plot", action="store_true", help="Plot one level of the result")
-    add_plot_options(out_d, default_cmap=DEFAULT_DIFF_CMAP)
-    out_d.add_argument("--quiet", action="store_true", help="Hide per-level progress bar")
-    add_json_flag(p_dod)
-    p_dod.set_defaults(func=cmd_dod)
+    add_data_dir(p_export)
+    add_variables_arg(p_export)
+    p_export.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        metavar="FILE.nc",
+        help="Output NetCDF path",
+    )
+    add_iterations_arg(p_export)
+    add_levels_arg(p_export)
+    add_region_arg(p_export)
+    add_rec_arg(p_export)
+    p_export.add_argument(
+        "--no-compress",
+        action="store_true",
+        help="Disable zlib compression on data variables",
+    )
+    add_json_flag(p_export)
+    p_export.set_defaults(func=cmd_export)
+
+    p_extract = sub.add_parser(
+        "extract",
+        help="Write a subset of snapshots to new MDS files",
+        formatter_class=HelpFormatter,
+        description=(
+            "Copy selected iterations, levels, and/or horizontal region to a new folder "
+            "as .data/.meta pairs. Reads one snapshot at a time."
+        ),
+    )
+    add_data_dir(p_extract)
+    add_variable(p_extract, required=True)
+    p_extract.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        metavar="DIR",
+        help="Output directory for subset MDS files",
+    )
+    add_iterations_arg(p_extract)
+    add_levels_arg(p_extract)
+    add_region_arg(p_extract)
+    add_rec_arg(p_extract)
+    add_json_flag(p_extract)
+    p_extract.set_defaults(func=cmd_extract)
+
+    p_ts = sub.add_parser(
+        "timeseries",
+        help="Extract a time series at a point, box, or domain mean",
+        formatter_class=HelpFormatter,
+        description=(
+            "Read one 2-D slab per iteration (memory-efficient). "
+            "Default: domain mean. Use --at or --box for point/box averages."
+        ),
+    )
+    add_data_dir(p_ts)
+    add_variable(p_ts, required=True)
+    add_iterations_arg(p_ts)
+    p_ts.add_argument(
+        "-l",
+        "--level",
+        type=int,
+        default=None,
+        metavar="K",
+        help="Vertical level for 3-D fields (default: mid-depth)",
+    )
+    p_ts.add_argument("--at", default=None, metavar="I,J", help="Grid point indices")
+    p_ts.add_argument(
+        "--box",
+        default=None,
+        metavar="I0,I1,J0,J1",
+        help="Index bounds for a spatial mean (exclusive upper bounds)",
+    )
+    p_ts.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        metavar="FILE",
+        help="Write CSV (.csv) or JSON (.json)",
+    )
+    p_ts.add_argument(
+        "--save-figure",
+        metavar="FILE.png",
+        default=None,
+        help="Save the line plot to PNG",
+    )
+    p_ts.add_argument(
+        "--no-plot",
+        action="store_true",
+        help="Skip the line plot (CSV/JSON only)",
+    )
+    p_ts.add_argument(
+        "--no-show",
+        action="store_true",
+        help="Do not open an interactive plot window",
+    )
+    add_rec_arg(p_ts)
+    add_json_flag(p_ts)
+    p_ts.set_defaults(func=cmd_timeseries)
 
     p_gen = sub.add_parser("generate-sample", help="Create synthetic test data", formatter_class=HelpFormatter)
     p_gen.add_argument("-o", "--output", default="sample_data", metavar="FOLDER")

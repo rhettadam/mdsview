@@ -42,7 +42,6 @@ class SampleRunInfo:
     nbytes_total: int
     tiled: bool
     recommended_level: int
-    recommended_dod: dict[str, int | str]
 
     @property
     def nbytes_human(self) -> str:
@@ -151,24 +150,6 @@ def _eta(mesh: _Mesh, iteration: int, *, variant: str = "baseline") -> np.ndarra
     return (amp * wave + 0.5 * amp * eddy).astype(np.float32)
 
 
-def expected_dod_mean(prefix_a: str, prefix_b: str, iter_1: int, iter_2: int) -> float | None:
-    """
-    Domain-mean DiD for generated T/S (rate fields are linear in x or y).
-
-    rate_T mean ~ 0.0008 + 0.0005 * 0.5 = 0.00105
-    rate_S mean ~ 0.0012 + 0.0007 * 0.5 = 0.00155
-    mean DiD ~ (0.00155 - 0.00105) * (iter_1 - iter_2)
-    """
-    if prefix_a != "T" or prefix_b != "S":
-        return None
-    gap_rate_mean = 0.0005
-    return gap_rate_mean * (iter_1 - iter_2)
-
-
-def expected_dod_has_structure(prefix_a: str, prefix_b: str) -> bool:
-    return prefix_a == "T" and prefix_b == "S"
-
-
 def _write_global(prefix_path: str, arr: np.ndarray, iteration: int | None) -> int:
     io.write_field(prefix_path, arr, iteration=iteration, dataprec="float32")
     return arr.nbytes
@@ -217,8 +198,6 @@ def _write_readme(
     variables: tuple[str, ...],
     tiled: bool,
     level: int,
-    t1: int,
-    t2: int,
     diff_pair: bool = False,
     companion_dir: str | None = None,
 ) -> None:
@@ -243,12 +222,10 @@ def _write_readme(
         else:
             f.write("Field design\n")
             f.write("  T  - thermocline + warm surface blob; warming faster in the east\n")
-            f.write("  S  - halocline + fresh lens; warming faster in the north\n")
-            f.write("  DiD(T,S) has visible x/y structure (different spatial warming rates)\n\n")
+            f.write("  S  - halocline + fresh lens; warming faster in the north\n\n")
         f.write("Recommended quick looks\n")
         f.write(f"  Level index for 3-D plots : {level} (mid-depth)\n")
-        f.write(f"  Same-run diff             : later={t_later}, earlier={t_earlier}\n")
-        f.write(f"  DiD times                 : t1={t1}, t2={t2}\n\n")
+        f.write(f"  Same-run diff             : later={t_later}, earlier={t_earlier}\n\n")
         f.write("Commands\n")
         f.write(f"  python -m mdsview.cli info -d {output_dir}\n")
         f.write(
@@ -264,20 +241,16 @@ def _write_readme(
             f"-d {output_dir} --plot --no-show --save-figure diff_eta.png\n"
         )
         if companion_dir:
-            f.write("\nCross-directory diff (GUI Diff tab):\n")
+            f.write("\nCross-directory diff:\n")
             f.write(f"  Later run   : {output_dir}\n")
             f.write(f"  Earlier run : {companion_dir}\n")
             f.write(f"  Variable T, later/earlier iter {t_later}, level {level}\n")
             f.write("  Expect east-side warming excess in warm/ minus ref/\n\n")
-        f.write(
-            f"  python -m mdsview.cli dod -a T -b S --time1 {t1} --time2 {t2} "
-            f"-l {level} --plot --no-show --save-figure dod_ts.png -d {output_dir}\n"
-        )
         f.write(f"  python -m mdsview.cli gui -d {output_dir}\n\n")
-        f.write("GUI: Field tab → T, level ~ mid, scrub iterations.\n")
-        f.write("     Diff tab → T, later/earlier times above, level ~ mid, Plot.\n")
+        f.write("GUI: Field tab -> T, level ~ mid, scrub iterations.\n")
+        f.write("     CLI diff -> T, later/earlier times above, level ~ mid.\n")
         if companion_dir:
-            f.write("     Diff tab → set Later/Earlier run folders to the ref/ and warm/ pair.\n")
+            f.write("     CLI diff with -d on ref/ and warm/ for cross-run comparison.\n")
 
 
 def generate_sample_run(
@@ -299,10 +272,10 @@ def generate_sample_run(
     variant: str = "baseline",
 ) -> SampleRunInfo:
     """
-    Create a synthetic run with realistic vertical structure and visible DiD patterns.
+    Create a synthetic run with realistic vertical structure and spatial diff patterns.
 
-    T and S use spatially varying linear-in-time trends so DiD(T,S) varies in x/y
-    (not a flat constant). Vertical levels show thermocline / halocline structure.
+    T and S use spatially varying linear-in-time trends so same-run diffs vary in x/y.
+    Vertical levels show thermocline / halocline structure.
     """
     if preset not in PRESETS and preset != "custom":
         raise ValueError(f"Unknown preset {preset!r}; choose from {', '.join(PRESETS)}")
@@ -330,7 +303,7 @@ def generate_sample_run(
     mesh = _build_mesh(nx, ny, nz)
     iterations = [iter_start + k * iter_step for k in range(n_iters)]
     recommended_level = nz // 2
-    t1, t2 = iterations[0], iterations[-1]
+    t_later, t_earlier = iterations[-1], iterations[0]
 
     builders = {
         "T": lambda itr: _temperature(mesh, itr, variant=variant),
@@ -391,8 +364,6 @@ def generate_sample_run(
         variables=variables,
         tiled=tiled,
         level=recommended_level,
-        t1=t1,
-        t2=t2,
     )
 
     info = SampleRunInfo(
@@ -405,12 +376,14 @@ def generate_sample_run(
         nbytes_total=nbytes_total,
         tiled=tiled,
         recommended_level=recommended_level,
-        recommended_dod={"var_a": "T", "var_b": "S", "time1": t1, "time2": t2, "level": recommended_level},
     )
 
     if progress:
         print(f"Done: {len(variables)} variables x {len(iterations)} iters, ~{info.nbytes_human} total")
-        print(f"Try DiD: dod -a T -b S --time1 {t1} --time2 {t2} -l {recommended_level} --plot")
+        print(
+            f"Try diff: diff -v T --later {t_later} --earlier {t_earlier} "
+            f"-l {recommended_level} --plot"
+        )
         print(f"See {readme}")
 
     return info
@@ -462,11 +435,15 @@ def generate_diff_pair(
         f.write(f"  Δ T @ level {level}: iter {t_later} minus {info_ref.iterations[0]}\n")
         f.write("  → west-to-east gradient (T) or south-to-north (S)\n")
         f.write(f"  Δ TRAC: moving blob between snapshots\n\n")
-        f.write("Cross-run diff (GUI Diff tab)\n")
+        f.write("Cross-run diff\n")
         f.write("  Later run   : warm/\n")
         f.write("  Earlier run : ref/\n")
         f.write(f"  Variable T, both at iter {t_later}, level {level}\n")
         f.write("  → positive anomaly on eastern half\n\n")
+        f.write(
+            f"  mdsview diff -v T --later {t_later} --earlier {t_later} -l {level} "
+            f"-d {warm_dir} --dir-b {ref_dir} --plot --no-show\n\n"
+        )
         f.write("Generate again:\n")
         f.write(f"  python -m mdsview.cli generate-sample -o {output_dir} --preset diff_demo --diff-pair\n\n")
         f.write(f"  python -m mdsview.cli gui -d {ref_dir}\n")

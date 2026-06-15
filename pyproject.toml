@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mdsview"
-version = "0.2.1"
+version = "0.2.2"
 description = "Browse, plot, and compare MITgcm MDS binary output from the CLI or an optional GUI."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.9"
@@ -31,6 +31,7 @@ dependencies = [
     "MITgcmutils>=0.1",
     "cmocean>=4.0",
     "pillow>=9.0",
+    "netCDF4>=1.6",
 ]
 
 [project.optional-dependencies]
